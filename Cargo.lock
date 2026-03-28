@@ -20,3 +20,12 @@ dependencies = [
 [[package]]
 name = "dx-parser"
 version = "0.1.0"
+
+[[package]]
+name = "dx-runtime"
+version = "0.1.0"
+dependencies = [
+ "dx-hir",
+ "dx-mir",
+ "dx-parser",
+]
