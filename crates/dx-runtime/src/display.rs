@@ -227,6 +227,10 @@ fn render_extern_abi_type(ty: &RuntimeExternAbiType) -> &'static str {
         RuntimeExternAbiType::Utf8Ptr => "Utf8Ptr",
         RuntimeExternAbiType::ClosureHandle => "ClosureHandle",
         RuntimeExternAbiType::EnvHandle => "EnvHandle",
+        RuntimeExternAbiType::Ptr => "Ptr",
+        RuntimeExternAbiType::I64 => "I64",
+        RuntimeExternAbiType::F64 => "F64",
+        RuntimeExternAbiType::I1 => "I1",
         RuntimeExternAbiType::U32 => "U32",
         RuntimeExternAbiType::Void => "Void",
     }
@@ -287,7 +291,12 @@ fn render_closure_abi_type(ty: ClosureAbiType) -> &'static str {
     match ty {
         ClosureAbiType::ClosureHandle => "ClosureHandle",
         ClosureAbiType::EnvHandle => "EnvHandle",
+        ClosureAbiType::Ptr => "Ptr",
+        ClosureAbiType::I64 => "I64",
+        ClosureAbiType::F64 => "F64",
+        ClosureAbiType::I1 => "I1",
         ClosureAbiType::U32 => "U32",
+        ClosureAbiType::Void => "Void",
     }
 }
 

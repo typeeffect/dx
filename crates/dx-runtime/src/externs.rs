@@ -10,6 +10,10 @@ pub enum RuntimeExternAbiType {
     Utf8Ptr,
     ClosureHandle,
     EnvHandle,
+    Ptr,
+    I64,
+    F64,
+    I1,
     U32,
     Void,
 }
@@ -108,7 +112,12 @@ fn from_closure_abi(ty: ClosureAbiType) -> RuntimeExternAbiType {
     match ty {
         ClosureAbiType::ClosureHandle => RuntimeExternAbiType::ClosureHandle,
         ClosureAbiType::EnvHandle => RuntimeExternAbiType::EnvHandle,
+        ClosureAbiType::Ptr => RuntimeExternAbiType::Ptr,
+        ClosureAbiType::I64 => RuntimeExternAbiType::I64,
+        ClosureAbiType::F64 => RuntimeExternAbiType::F64,
+        ClosureAbiType::I1 => RuntimeExternAbiType::I1,
         ClosureAbiType::U32 => RuntimeExternAbiType::U32,
+        ClosureAbiType::Void => RuntimeExternAbiType::Void,
     }
 }
 
@@ -173,7 +182,9 @@ mod tests {
         let hooks: Vec<_> = plan.externs.iter().map(|it| it.hook).collect();
         assert!(hooks.contains(&RuntimeHookKind::Py(RuntimeHook::PyCallFunction)));
         assert!(hooks.contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::Create)));
-        assert!(hooks.contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::ThunkCall)));
+        assert!(hooks.contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::ThunkCall(
+            crate::closure::ClosureReturnAbi::Ptr,
+        ))));
     }
 
     #[test]
@@ -218,21 +229,25 @@ mod tests {
     #[test]
     fn closure_hook_signature_is_lowered_to_unified_abi() {
         let plan = build_runtime_extern_plan(&RuntimeOpsPlan {
-            required_hooks: vec![RuntimeHookKind::Closure(ClosureRuntimeHook::Call)],
+            required_hooks: vec![RuntimeHookKind::Closure(ClosureRuntimeHook::Call(
+                crate::closure::ClosureReturnAbi::Ptr,
+            ))],
             ops: vec![],
         });
 
         assert_eq!(
             plan.externs,
             vec![RuntimeExtern {
-                hook: RuntimeHookKind::Closure(ClosureRuntimeHook::Call),
+                hook: RuntimeHookKind::Closure(ClosureRuntimeHook::Call(
+                    crate::closure::ClosureReturnAbi::Ptr,
+                )),
                 signature: RuntimeExternSignature {
-                    symbol: "dx_rt_closure_call",
+                    symbol: "dx_rt_closure_call_ptr",
                     params: vec![
                         RuntimeExternAbiType::ClosureHandle,
                         RuntimeExternAbiType::U32,
                     ],
-                    ret: RuntimeExternAbiType::ClosureHandle,
+                    ret: RuntimeExternAbiType::Ptr,
                 },
             }]
         );
@@ -242,7 +257,9 @@ mod tests {
     fn externs_are_sorted_stably_by_symbol() {
         let plan = build_runtime_extern_plan(&RuntimeOpsPlan {
             required_hooks: vec![
-                RuntimeHookKind::Closure(ClosureRuntimeHook::ThunkCall),
+                RuntimeHookKind::Closure(ClosureRuntimeHook::ThunkCall(
+                    crate::closure::ClosureReturnAbi::Ptr,
+                )),
                 RuntimeHookKind::Py(RuntimeHook::PyCallMethod),
                 RuntimeHookKind::Closure(ClosureRuntimeHook::Create),
             ],
@@ -255,7 +272,7 @@ mod tests {
             vec![
                 "dx_rt_closure_create",
                 "dx_rt_py_call_method",
-                "dx_rt_thunk_call",
+                "dx_rt_thunk_call_ptr",
             ]
         );
     }

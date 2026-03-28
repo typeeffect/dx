@@ -174,7 +174,7 @@ mod tests {
     fn snapshot_extern_closure_hooks() {
         let out = render("fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n");
         assert!(out.contains("declare ptr @dx_rt_closure_create("), "got:\n{out}");
-        assert!(out.contains("declare ptr @dx_rt_thunk_call("), "got:\n{out}");
+        assert!(out.contains("declare i64 @dx_rt_thunk_call_i64("), "got:\n{out}");
     }
 
     #[test]
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn snapshot_thunk_call_instruction() {
         let out = render("fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n");
-        assert!(out.contains("call ptr @dx_rt_thunk_call("), "got:\n{out}");
+        assert!(out.contains("call i64 @dx_rt_thunk_call_i64("), "got:\n{out}");
         assert!(out.contains("thunk-call"), "got:\n{out}");
     }
 

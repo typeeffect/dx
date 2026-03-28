@@ -6,7 +6,7 @@ use dx_hir::Type;
 use dx_mir::mir;
 use dx_runtime::{
     build_runtime_extern_plan_from_module, build_runtime_ops_plan, build_throw_runtime_plan_from_module,
-    RuntimeHookKind, RuntimeOp, RuntimeOpKind,
+    ClosureAbiType, RuntimeHookKind, RuntimeOp, RuntimeOpKind,
 };
 use std::collections::BTreeMap;
 
@@ -149,8 +149,21 @@ fn lower_runtime_op(op: &RuntimeOp) -> LowStep {
 
 fn low_ret_from_runtime_hook(hook: RuntimeHookKind) -> LowType {
     match hook {
-        RuntimeHookKind::Py(_) | RuntimeHookKind::Closure(_) => LowType::Ptr,
+        RuntimeHookKind::Py(_) => LowType::Ptr,
+        RuntimeHookKind::Closure(hook) => low_type_from_closure_abi(hook.signature().ret),
         RuntimeHookKind::Throw(_) => LowType::Void,
+    }
+}
+
+fn low_type_from_closure_abi(ty: ClosureAbiType) -> LowType {
+    match ty {
+        ClosureAbiType::ClosureHandle | ClosureAbiType::EnvHandle | ClosureAbiType::Ptr => {
+            LowType::Ptr
+        }
+        ClosureAbiType::I64 | ClosureAbiType::U32 => LowType::I64,
+        ClosureAbiType::F64 => LowType::F64,
+        ClosureAbiType::I1 => LowType::I1,
+        ClosureAbiType::Void => LowType::Void,
     }
 }
 
@@ -290,7 +303,7 @@ mod tests {
         assert!(steps.iter().any(|step| matches!(
             step,
             LowStep::RuntimeCall { symbol, kind: LowRuntimeCallKind::ClosureInvoke { thunk: true, .. }, .. }
-            if *symbol == "dx_rt_thunk_call"
+            if symbol.starts_with("dx_rt_thunk_call")
         )));
     }
 

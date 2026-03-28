@@ -12,7 +12,7 @@ pub use abi::{
     RuntimeHookSignature,
 };
 pub use closure::{
-    build_closure_runtime_plan, ClosureAbiType, ClosureRuntimeHook,
+    build_closure_runtime_plan, ClosureAbiType, ClosureReturnAbi, ClosureRuntimeHook,
     ClosureRuntimeHookSignature, ClosureRuntimePlan, LoweredClosureCreation,
     LoweredClosureInvocation,
 };

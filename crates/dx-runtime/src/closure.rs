@@ -6,13 +6,27 @@ pub enum ClosureAbiType {
     ClosureHandle,
     EnvHandle,
     U32,
+    I64,
+    F64,
+    I1,
+    Ptr,
+    Void,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ClosureRuntimeHook {
     Create,
-    Call,
-    ThunkCall,
+    Call(ClosureReturnAbi),
+    ThunkCall(ClosureReturnAbi),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ClosureReturnAbi {
+    I64,
+    F64,
+    I1,
+    Ptr,
+    Void,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,15 +86,15 @@ impl ClosureRuntimeHook {
                 params: CREATE_PARAMS,
                 ret: ClosureAbiType::ClosureHandle,
             },
-            ClosureRuntimeHook::Call => ClosureRuntimeHookSignature {
-                symbol: "dx_rt_closure_call",
+            ClosureRuntimeHook::Call(ret) => ClosureRuntimeHookSignature {
+                symbol: call_symbol(ret),
                 params: CALL_PARAMS,
-                ret: ClosureAbiType::ClosureHandle,
+                ret: closure_return_abi_type(ret),
             },
-            ClosureRuntimeHook::ThunkCall => ClosureRuntimeHookSignature {
-                symbol: "dx_rt_thunk_call",
+            ClosureRuntimeHook::ThunkCall(ret) => ClosureRuntimeHookSignature {
+                symbol: thunk_call_symbol(ret),
                 params: THUNK_CALL_PARAMS,
-                ret: ClosureAbiType::ClosureHandle,
+                ret: closure_return_abi_type(ret),
             },
         }
     }
@@ -129,7 +143,7 @@ pub fn build_closure_runtime_plan(module: &mir::Module) -> ClosureRuntimePlan {
                         let Some(closure_local) = local_closure_operand(callee) else {
                             continue;
                         };
-                        let Some(hook) = hook_for_closure_call(target, args.len()) else {
+                        let Some(hook) = hook_for_closure_call(target, args.len(), ty) else {
                             continue;
                         };
                         add_hook(&mut required_hooks, hook);
@@ -162,16 +176,60 @@ pub fn build_closure_runtime_plan(module: &mir::Module) -> ClosureRuntimePlan {
 fn hook_for_closure_call(
     target: &typed::CallTarget,
     arg_count: usize,
+    result_type: &Type,
 ) -> Option<ClosureRuntimeHook> {
+    let ret_abi = closure_return_abi(result_type);
     match target {
         typed::CallTarget::LocalClosure { .. } => {
             if arg_count == 0 {
-                Some(ClosureRuntimeHook::ThunkCall)
+                Some(ClosureRuntimeHook::ThunkCall(ret_abi))
             } else {
-                Some(ClosureRuntimeHook::Call)
+                Some(ClosureRuntimeHook::Call(ret_abi))
             }
         }
         _ => None,
+    }
+}
+
+fn closure_return_abi(ty: &Type) -> ClosureReturnAbi {
+    match ty {
+        Type::Int => ClosureReturnAbi::I64,
+        Type::Float => ClosureReturnAbi::F64,
+        Type::Bool => ClosureReturnAbi::I1,
+        Type::Unit => ClosureReturnAbi::Void,
+        Type::Str | Type::PyObj | Type::Named(_) | Type::Function { .. } | Type::Unknown => {
+            ClosureReturnAbi::Ptr
+        }
+    }
+}
+
+fn closure_return_abi_type(abi: ClosureReturnAbi) -> ClosureAbiType {
+    match abi {
+        ClosureReturnAbi::I64 => ClosureAbiType::I64,
+        ClosureReturnAbi::F64 => ClosureAbiType::F64,
+        ClosureReturnAbi::I1 => ClosureAbiType::I1,
+        ClosureReturnAbi::Ptr => ClosureAbiType::Ptr,
+        ClosureReturnAbi::Void => ClosureAbiType::Void,
+    }
+}
+
+fn call_symbol(ret: ClosureReturnAbi) -> &'static str {
+    match ret {
+        ClosureReturnAbi::I64 => "dx_rt_closure_call_i64",
+        ClosureReturnAbi::F64 => "dx_rt_closure_call_f64",
+        ClosureReturnAbi::I1 => "dx_rt_closure_call_i1",
+        ClosureReturnAbi::Ptr => "dx_rt_closure_call_ptr",
+        ClosureReturnAbi::Void => "dx_rt_closure_call_void",
+    }
+}
+
+fn thunk_call_symbol(ret: ClosureReturnAbi) -> &'static str {
+    match ret {
+        ClosureReturnAbi::I64 => "dx_rt_thunk_call_i64",
+        ClosureReturnAbi::F64 => "dx_rt_thunk_call_f64",
+        ClosureReturnAbi::I1 => "dx_rt_thunk_call_i1",
+        ClosureReturnAbi::Ptr => "dx_rt_thunk_call_ptr",
+        ClosureReturnAbi::Void => "dx_rt_thunk_call_void",
     }
 }
 
@@ -224,9 +282,11 @@ mod tests {
         let plan = build_closure_runtime_plan(&module);
 
         assert!(plan.required_hooks.contains(&ClosureRuntimeHook::Create));
-        assert!(plan.required_hooks.contains(&ClosureRuntimeHook::ThunkCall));
+        assert!(plan
+            .required_hooks
+            .contains(&ClosureRuntimeHook::ThunkCall(ClosureReturnAbi::I64)));
         assert_eq!(plan.invocations.len(), 1);
-        assert_eq!(plan.invocations[0].runtime_symbol, "dx_rt_thunk_call");
+        assert_eq!(plan.invocations[0].runtime_symbol, "dx_rt_thunk_call_i64");
         assert_eq!(plan.invocations[0].arg_count, 0);
     }
 
@@ -237,9 +297,11 @@ mod tests {
         let plan = build_closure_runtime_plan(&module);
 
         assert!(plan.required_hooks.contains(&ClosureRuntimeHook::Create));
-        assert!(plan.required_hooks.contains(&ClosureRuntimeHook::Call));
+        assert!(plan
+            .required_hooks
+            .contains(&ClosureRuntimeHook::Call(ClosureReturnAbi::I64)));
         assert_eq!(plan.invocations.len(), 1);
-        assert_eq!(plan.invocations[0].runtime_symbol, "dx_rt_closure_call");
+        assert_eq!(plan.invocations[0].runtime_symbol, "dx_rt_closure_call_i64");
         assert_eq!(plan.invocations[0].arg_count, 1);
     }
 
@@ -254,19 +316,19 @@ mod tests {
             }
         );
         assert_eq!(
-            ClosureRuntimeHook::Call.signature(),
+            ClosureRuntimeHook::Call(ClosureReturnAbi::Ptr).signature(),
             ClosureRuntimeHookSignature {
-                symbol: "dx_rt_closure_call",
+                symbol: "dx_rt_closure_call_ptr",
                 params: CALL_PARAMS,
-                ret: ClosureAbiType::ClosureHandle,
+                ret: ClosureAbiType::Ptr,
             }
         );
         assert_eq!(
-            ClosureRuntimeHook::ThunkCall.signature(),
+            ClosureRuntimeHook::ThunkCall(ClosureReturnAbi::Ptr).signature(),
             ClosureRuntimeHookSignature {
-                symbol: "dx_rt_thunk_call",
+                symbol: "dx_rt_thunk_call_ptr",
                 params: THUNK_CALL_PARAMS,
-                ret: ClosureAbiType::ClosureHandle,
+                ret: ClosureAbiType::Ptr,
             }
         );
     }

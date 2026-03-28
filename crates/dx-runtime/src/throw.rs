@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(plan.required_hooks, vec![ThrowRuntimeHook::CheckPending]);
         assert_eq!(plan.sites.len(), 1);
         assert_eq!(plan.sites[0].boundary, ThrowBoundaryKind::ThunkCall);
-        assert_eq!(plan.sites[0].source_runtime_symbol, "dx_rt_thunk_call");
+        assert_eq!(plan.sites[0].source_runtime_symbol, "dx_rt_thunk_call_ptr");
     }
 
     #[test]
@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(plan.required_hooks, vec![ThrowRuntimeHook::CheckPending]);
         assert_eq!(plan.sites.len(), 1);
         assert_eq!(plan.sites[0].boundary, ThrowBoundaryKind::ClosureCall);
-        assert_eq!(plan.sites[0].source_runtime_symbol, "dx_rt_closure_call");
+        assert_eq!(plan.sites[0].source_runtime_symbol, "dx_rt_closure_call_ptr");
     }
 
     #[test]

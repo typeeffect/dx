@@ -1,6 +1,7 @@
 use crate::abi::RuntimeHook;
 use crate::closure::{
-    build_closure_runtime_plan, ClosureRuntimeHook, LoweredClosureCreation, LoweredClosureInvocation,
+    build_closure_runtime_plan, ClosureReturnAbi, ClosureRuntimeHook, LoweredClosureCreation,
+    LoweredClosureInvocation,
 };
 use crate::lower::{lower_python_runtime_calls, PyDispatchTarget};
 use crate::throw::ThrowRuntimeHook;
@@ -95,13 +96,7 @@ pub fn build_runtime_ops_plan(module: &mir::Module) -> RuntimeOpsPlan {
     }
 
     for invocation in &closure_plan.invocations {
-        let hook = match invocation.target {
-            dx_hir::typed::CallTarget::LocalClosure { .. } if invocation.arg_count == 0 => {
-                ClosureRuntimeHook::ThunkCall
-            }
-            dx_hir::typed::CallTarget::LocalClosure { .. } => ClosureRuntimeHook::Call,
-            _ => continue,
-        };
+        let hook = closure_hook_for_invocation(invocation);
         add_hook(&mut required_hooks, RuntimeHookKind::Closure(hook));
         ops.push(lower_invocation(invocation));
     }
@@ -146,13 +141,7 @@ fn lower_invocation(invocation: &LoweredClosureInvocation) -> RuntimeOp {
         block: invocation.block,
         statement: invocation.statement,
         destination: Some(invocation.destination),
-        hook: RuntimeHookKind::Closure(match invocation.target {
-            dx_hir::typed::CallTarget::LocalClosure { .. } if invocation.arg_count == 0 => {
-                ClosureRuntimeHook::ThunkCall
-            }
-            dx_hir::typed::CallTarget::LocalClosure { .. } => ClosureRuntimeHook::Call,
-            _ => unreachable!("non-closure invocation passed to lower_invocation"),
-        }),
+        hook: RuntimeHookKind::Closure(closure_hook_for_invocation(invocation)),
         runtime_symbol: invocation.runtime_symbol,
         effects: invocation.effects.clone(),
         result_type: Some(invocation.result_type.clone()),
@@ -161,6 +150,25 @@ fn lower_invocation(invocation: &LoweredClosureInvocation) -> RuntimeOp {
             arg_count: invocation.arg_count,
             thunk: invocation.arg_count == 0,
         },
+    }
+}
+
+fn closure_hook_for_invocation(invocation: &LoweredClosureInvocation) -> ClosureRuntimeHook {
+    let ret = match invocation.result_type {
+        Type::Int => ClosureReturnAbi::I64,
+        Type::Float => ClosureReturnAbi::F64,
+        Type::Bool => ClosureReturnAbi::I1,
+        Type::Unit => ClosureReturnAbi::Void,
+        Type::Str | Type::PyObj | Type::Named(_) | Type::Function { .. } | Type::Unknown => {
+            ClosureReturnAbi::Ptr
+        }
+    };
+    match invocation.target {
+        dx_hir::typed::CallTarget::LocalClosure { .. } if invocation.arg_count == 0 => {
+            ClosureRuntimeHook::ThunkCall(ret)
+        }
+        dx_hir::typed::CallTarget::LocalClosure { .. } => ClosureRuntimeHook::Call(ret),
+        _ => unreachable!("non-closure invocation passed to lower_invocation"),
     }
 }
 
@@ -235,7 +243,9 @@ mod tests {
             .contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::Create)));
         assert!(plan
             .required_hooks
-            .contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::ThunkCall)));
+            .contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::ThunkCall(
+                ClosureReturnAbi::Ptr,
+            ))));
         assert_eq!(plan.ops.len(), 3);
     }
 

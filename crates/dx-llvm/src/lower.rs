@@ -223,7 +223,7 @@ mod tests {
         )));
         assert!(run.blocks[0].instructions.iter().any(|it| matches!(
             it,
-            Instruction::CallExtern { symbol, .. } if *symbol == "dx_rt_thunk_call"
+            Instruction::CallExtern { symbol, .. } if symbol.starts_with("dx_rt_thunk_call")
         )));
     }
 

@@ -106,7 +106,11 @@ impl LowType {
             RuntimeExternAbiType::PyObjHandle
             | RuntimeExternAbiType::Utf8Ptr
             | RuntimeExternAbiType::ClosureHandle
-            | RuntimeExternAbiType::EnvHandle => LowType::Ptr,
+            | RuntimeExternAbiType::EnvHandle
+            | RuntimeExternAbiType::Ptr => LowType::Ptr,
+            RuntimeExternAbiType::I64 => LowType::I64,
+            RuntimeExternAbiType::F64 => LowType::F64,
+            RuntimeExternAbiType::I1 => LowType::I1,
             RuntimeExternAbiType::U32 => LowType::I64,
             RuntimeExternAbiType::Void => LowType::Void,
         }
