@@ -718,6 +718,19 @@ Important rule:
 
 There must not be separate disconnected engines for LINQ, PowerQuery, and measures.
 
+## AD and Probabilistic Programming Direction
+
+`dx` should intentionally preserve a path toward:
+
+- automatic differentiation as an effect-oriented subsystem
+- probabilistic programming via effect interpretation
+
+This direction comes from proven `dx-03` experiments and should be treated as a deliberate future axis, not an accidental extra.
+
+See:
+
+- `DX_AD_PPL_DIRECTION.md`
+
 ## LLM-Friendliness
 
 This is a first-class design goal.

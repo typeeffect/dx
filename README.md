@@ -16,6 +16,7 @@ Current focus:
   - language vision
   - design critique
   - Python interop architecture
+  - AD / probabilistic programming direction
 - `spec/`
   - v0.1 core spec
 - `examples/`
@@ -51,3 +52,4 @@ and validate it against:
 See also:
 
 - `docs/PY_INTEROP_ARCHITECTURE.md`
+- `docs/DX_AD_PPL_DIRECTION.md`
