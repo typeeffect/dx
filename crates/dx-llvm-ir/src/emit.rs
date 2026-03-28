@@ -288,8 +288,11 @@ fn lower_operand(state: &mut FunctionEmitState<'_>, operand: &Operand, out: &mut
     match operand {
         Operand::ConstInt(value) => Ok(value.to_string()),
         Operand::Register(name, ty) => {
-            if name.starts_with("%py_") || name == "%unit" {
+            if name.starts_with("%py_") {
                 return Err(EmitError::UnsupportedOperand(name.clone()));
+            }
+            if name == "%unit" {
+                return Ok("null".to_string());
             }
             let tmp = state.fresh();
             writeln!(out, "  {tmp} = load {}, ptr {}", render_type(ty), slot_name(name)).unwrap();
@@ -417,6 +420,24 @@ mod tests {
         let ir = emit_module(&module).expect("emit");
         assert!(ir.contains("br i1"), "got:\n{ir}");
         assert!(ir.contains("bb0:"), "got:\n{ir}");
+    }
+
+    #[test]
+    fn emits_real_ir_for_unit_return() {
+        let module = llvm_module("fun f() -> Unit:\n    42\n.\n");
+        let ir = emit_module(&module).expect("emit");
+        assert!(ir.contains("define void @f()"), "got:\n{ir}");
+        assert!(ir.contains("ret void"), "got:\n{ir}");
+    }
+
+    #[test]
+    fn emits_real_ir_for_thunk_runtime_call() {
+        let module = llvm_module("fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n");
+        let ir = emit_module(&module).expect("emit");
+        assert!(ir.contains("@dx_rt_closure_create"), "got:\n{ir}");
+        assert!(ir.contains("@dx_rt_thunk_call_i64"), "got:\n{ir}");
+        assert!(ir.contains("alloca { i64 }"), "got:\n{ir}");
+        assert!(ir.contains("getelementptr inbounds { i64 }"), "got:\n{ir}");
     }
 
     #[test]
