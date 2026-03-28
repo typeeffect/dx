@@ -244,7 +244,7 @@ fn pattern_str(pattern: &dx_hir::Pattern) -> String {
     }
 }
 
-fn render_type(ty: &Type) -> String {
+pub fn render_type(ty: &Type) -> String {
     match ty {
         Type::Int => "Int".to_string(),
         Type::Float => "Float".to_string(),
@@ -419,6 +419,68 @@ mod tests {
         assert!(out.contains("[py:read_csv]"), "got:\n{out}");
         assert!(out.contains("'head"), "got:\n{out}");
         assert!(out.contains("'values"), "got:\n{out}");
+    }
+
+    // ── closure capture rendering ─────────────────────────────────
+
+    #[test]
+    fn snapshot_closure_single_capture() {
+        let out = render("fun make(x: Int) -> lazy Int:\n    lazy x\n.\n");
+        assert!(out.contains("closure() -> Int"), "got:\n{out}");
+        assert!(out.contains("captures [x: Int <="), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_closure_multiple_captures() {
+        let out = render(
+            "fun make(a: Int, b: Str) -> lazy Int:\n    lazy a\n.\n",
+        );
+        assert!(out.contains("closure("), "got:\n{out}");
+        assert!(out.contains("captures ["), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_thunk_capture_pyobj() {
+        let out = render(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    lazy read_csv(path)\n.\n",
+        );
+        assert!(out.contains("closure() -> PyObj !py"), "got:\n{out}");
+        assert!(out.contains("captures [path: Str <="), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_lambda_with_capture() {
+        let out = render(
+            "fun make(x: Int) -> (Int) -> Int:\n    (y: Int) => x + y\n.\n",
+        );
+        assert!(out.contains("closure(Int) -> Int"), "got:\n{out}");
+        assert!(out.contains("captures [x: Int <="), "got:\n{out}");
+    }
+
+    // ── validation with closures ─────────────────────────────────
+
+    #[test]
+    fn closures_validate_cleanly() {
+        let sources = vec![
+            "fun make(x: Int) -> lazy Int:\n    lazy x\n.\n",
+            "fun make(x: Int) -> (Int) -> Int:\n    (y: Int) => x + y\n.\n",
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    lazy read_csv(path)\n.\n",
+        ];
+        for src in sources {
+            let tokens = Lexer::new(src).tokenize();
+            let mut parser = Parser::new(tokens);
+            let ast = parser.parse_module().expect("parse");
+            let hir = lower_hir(&ast);
+            let typed = typecheck_module(&hir);
+            let mir = lower_module(&typed.module);
+            let report = crate::validate::validate_module(&mir);
+            assert!(
+                report.diagnostics.is_empty(),
+                "validation failed for:\n{}\ndiagnostics: {:?}",
+                render_module(&mir),
+                report.diagnostics
+            );
+        }
     }
 
     // ── validation + rendering interaction ───────────────────────

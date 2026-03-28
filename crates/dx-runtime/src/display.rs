@@ -1,6 +1,8 @@
 use crate::abi::{AbiType, PyRuntimePlan};
+use crate::closure::{ClosureAbiType, ClosureRuntimePlan};
 use crate::lower::{LoweredPyCall, PyDispatchTarget};
 use crate::py::PyCallKind;
+use dx_mir::display::render_type;
 use std::fmt::Write;
 
 pub fn render_runtime_plan(plan: &PyRuntimePlan) -> String {
@@ -75,6 +77,89 @@ fn render_dispatch(dispatch: &PyDispatchTarget) -> String {
         PyDispatchTarget::Function { module: None, name } => format!("?.{name}"),
         PyDispatchTarget::Method { name } => format!(".{name}"),
         PyDispatchTarget::Dynamic => "dynamic".to_string(),
+    }
+}
+
+pub fn render_closure_plan(plan: &ClosureRuntimePlan) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== Closure Runtime Plan ===").unwrap();
+    writeln!(out).unwrap();
+
+    if !plan.required_hooks.is_empty() {
+        writeln!(out, "required hooks:").unwrap();
+        for hook in &plan.required_hooks {
+            let sig = hook.signature();
+            writeln!(
+                out,
+                "  {} -> {}",
+                sig.symbol,
+                render_closure_abi_type(sig.ret)
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    if !plan.creations.is_empty() {
+        writeln!(out, "creations:").unwrap();
+        for creation in &plan.creations {
+            write!(
+                out,
+                "  {}/bb{}[{}] -> _{}  ",
+                creation.function, creation.block, creation.statement, creation.destination
+            )
+            .unwrap();
+            let params: Vec<String> = creation.param_types.iter().map(render_type).collect();
+            write!(out, "closure({}) -> {}", params.join(", "), render_type(&creation.return_type))
+                .unwrap();
+            for effect in &creation.effects {
+                write!(out, " !{effect}").unwrap();
+            }
+            if !creation.captures.is_empty() {
+                write!(out, "  captures [").unwrap();
+                for (i, cap) in creation.captures.iter().enumerate() {
+                    if i > 0 {
+                        write!(out, ", ").unwrap();
+                    }
+                    write!(out, "{}: {} <= _{}", cap.name, render_type(&cap.ty), cap.source)
+                        .unwrap();
+                }
+                write!(out, "]").unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    if !plan.invocations.is_empty() {
+        writeln!(out, "invocations:").unwrap();
+        for inv in &plan.invocations {
+            write!(
+                out,
+                "  {}/bb{}[{}] -> _{}  ",
+                inv.function, inv.block, inv.statement, inv.destination
+            )
+            .unwrap();
+            write!(out, "{} _{}(args={})", inv.runtime_symbol, inv.closure_local, inv.arg_count)
+                .unwrap();
+            if !inv.effects.is_empty() {
+                for effect in &inv.effects {
+                    write!(out, " !{effect}").unwrap();
+                }
+            }
+            writeln!(out).unwrap();
+        }
+    }
+
+    out
+}
+
+fn render_closure_abi_type(ty: ClosureAbiType) -> &'static str {
+    match ty {
+        ClosureAbiType::ClosureHandle => "ClosureHandle",
+        ClosureAbiType::EnvHandle => "EnvHandle",
+        ClosureAbiType::U32 => "U32",
     }
 }
 
@@ -208,5 +293,62 @@ mod tests {
         assert!(plan.call_sites.is_empty());
         let out = render_runtime_plan(&plan);
         assert!(out.contains("Python Runtime Plan"), "got:\n{out}");
+    }
+
+    // ── closure plan rendering ───────────────────────────────────
+
+    #[test]
+    fn snapshot_closure_plan_thunk() {
+        let module = lower("fun make(x: Int) -> lazy Int:\n    lazy x\n.\n");
+        let plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_closure_plan(&plan);
+        assert!(out.contains("Closure Runtime Plan"), "got:\n{out}");
+        assert!(out.contains("dx_rt_closure_create"), "got:\n{out}");
+        assert!(out.contains("closure() -> Int"), "got:\n{out}");
+        assert!(out.contains("captures [x: Int <="), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_closure_plan_lambda_with_capture() {
+        let module = lower(
+            "fun make(x: Int) -> (Int) -> Int:\n    (y: Int) => x + y\n.\n",
+        );
+        let plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_closure_plan(&plan);
+        assert!(out.contains("closure(Int) -> Int"), "got:\n{out}");
+        assert!(out.contains("captures [x: Int <="), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_closure_plan_thunk_invocation() {
+        let module = lower(
+            "fun use_it(x: Int) -> Int:\n    val f = lazy x\n    f()\n.\n",
+        );
+        let plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_closure_plan(&plan);
+        assert!(out.contains("creations:"), "got:\n{out}");
+        assert!(out.contains("invocations:"), "got:\n{out}");
+        assert!(out.contains("dx_rt_thunk_call"), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_closure_plan_pyobj_capture() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    lazy read_csv(path)\n.\n",
+        );
+        let plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_closure_plan(&plan);
+        assert!(out.contains("closure() -> PyObj !py"), "got:\n{out}");
+        assert!(out.contains("captures [path: Str <="), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_closure_plan_empty_module() {
+        let module = lower("fun f() -> Int:\n    1\n.\n");
+        let plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_closure_plan(&plan);
+        assert!(out.contains("Closure Runtime Plan"), "got:\n{out}");
+        assert!(!out.contains("creations:"), "got:\n{out}");
+        assert!(!out.contains("invocations:"), "got:\n{out}");
     }
 }
