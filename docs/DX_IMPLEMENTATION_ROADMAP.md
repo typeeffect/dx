@@ -505,6 +505,10 @@ Exit criteria:
 
 - demo programs in the stable subset can be lowered and executed end to end
 
+Reference plan:
+
+- `docs/DX_RUNTIME_STUB_PLAN.md`
+
 Exit criteria:
 
 - effect mismatches become diagnosable
