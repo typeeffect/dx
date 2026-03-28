@@ -1,6 +1,6 @@
 use crate::{hir, typed, types::Type};
 use dx_parser::BinOp;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeCheckDiagnostic {
@@ -333,10 +333,11 @@ impl Checker {
                     typed::ClosureBody::Expr(expr) => expr.ty.clone(),
                     typed::ClosureBody::Block(block) => block.ty.clone(),
                 };
+                let effects = infer_typed_closure_body_effects(&typed_body);
                 let ty = Type::Function {
                     params: typed_params.iter().map(|p| p.ty.clone()).collect(),
                     ret: Box::new(ret),
-                    effects: vec![],
+                    effects,
                 };
                 typed::Expr {
                     ty,
@@ -647,6 +648,89 @@ fn callable_from_typed_expr(expr: &typed::Expr) -> Option<CallableSig> {
     callable_from_type(&expr.ty)
 }
 
+fn infer_typed_closure_body_effects(body: &typed::ClosureBody) -> Vec<String> {
+    let mut effects = BTreeSet::new();
+    match body {
+        typed::ClosureBody::Expr(expr) => infer_typed_expr_effects(expr, &mut effects),
+        typed::ClosureBody::Block(block) => infer_typed_block_effects(block, &mut effects),
+    }
+    effects.into_iter().collect()
+}
+
+fn infer_typed_block_effects(block: &typed::Block, effects: &mut BTreeSet<String>) {
+    for stmt in &block.stmts {
+        match stmt {
+            typed::Stmt::Let { value, .. } => infer_typed_expr_effects(value, effects),
+            typed::Stmt::Rebind { value, .. } => infer_typed_expr_effects(value, effects),
+            typed::Stmt::Expr(expr) => infer_typed_expr_effects(expr, effects),
+        }
+    }
+    if let Some(result) = &block.result {
+        infer_typed_expr_effects(result, effects);
+    }
+}
+
+fn infer_typed_expr_effects(expr: &typed::Expr, effects: &mut BTreeSet<String>) {
+    match &expr.kind {
+        typed::ExprKind::Unit
+        | typed::ExprKind::Name(_)
+        | typed::ExprKind::Integer(_)
+        | typed::ExprKind::String(_) => {}
+        typed::ExprKind::Member { base, .. } => infer_typed_expr_effects(base, effects),
+        typed::ExprKind::Call {
+            target,
+            callee,
+            args,
+        } => {
+            infer_typed_expr_effects(callee, effects);
+            for arg in args {
+                match arg {
+                    typed::Arg::Positional(expr) => infer_typed_expr_effects(expr, effects),
+                    typed::Arg::Named { value, .. } => infer_typed_expr_effects(value, effects),
+                }
+            }
+
+            match target {
+                typed::CallTarget::PythonFunction { .. }
+                | typed::CallTarget::PythonMember { .. }
+                | typed::CallTarget::PythonDynamic => {
+                    effects.insert("py".to_string());
+                }
+                typed::CallTarget::NativeFunction { .. }
+                | typed::CallTarget::LocalClosure { .. }
+                | typed::CallTarget::Dynamic => {}
+            }
+
+            if let Type::Function { effects: call_fx, .. } = &callee.ty {
+                effects.extend(call_fx.iter().cloned());
+            }
+        }
+        typed::ExprKind::Closure { .. } => {}
+        typed::ExprKind::If {
+            branches,
+            else_branch,
+        } => {
+            for (condition, block) in branches {
+                infer_typed_expr_effects(condition, effects);
+                infer_typed_block_effects(block, effects);
+            }
+            if let Some(block) = else_branch {
+                infer_typed_block_effects(block, effects);
+            }
+        }
+        typed::ExprKind::Match { scrutinee, arms } => {
+            infer_typed_expr_effects(scrutinee, effects);
+            for arm in arms {
+                infer_typed_block_effects(&arm.body, effects);
+            }
+        }
+        typed::ExprKind::BinaryOp { lhs, rhs, .. } => {
+            infer_typed_expr_effects(lhs, effects);
+            infer_typed_expr_effects(rhs, effects);
+        }
+    }
+}
+
 fn bind_pattern(pattern: &hir::Pattern, scope: &mut Scope) {
     match pattern {
         hir::Pattern::Name(name) => scope.define(
@@ -774,6 +858,27 @@ mod tests {
                     Type::Function { params, ret, .. } => {
                         assert!(params.is_empty());
                         assert_eq!(ret.as_ref(), &Type::Int);
+                    }
+                    other => panic!("expected function type, got {other:?}"),
+                },
+                other => panic!("expected let, got {other:?}"),
+            },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn closure_type_carries_py_effects() {
+        let report = check(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    val f = lazy read_csv(path)\n    f\n.\n",
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[1] {
+            typed::Item::Function(function) => match &function.body.stmts[0] {
+                typed::Stmt::Let { value, .. } => match &value.ty {
+                    Type::Function { effects, ret, .. } => {
+                        assert_eq!(ret.as_ref(), &Type::PyObj);
+                        assert_eq!(effects, &vec!["py".to_string()]);
                     }
                     other => panic!("expected function type, got {other:?}"),
                 },
