@@ -94,10 +94,12 @@ pub enum Rvalue {
         callee: Operand,
         args: Vec<CallArg>,
         ty: Type,
+        effects: Vec<String>,
     },
     Closure {
         param_types: Vec<Type>,
         return_type: Type,
+        effects: Vec<String>,
     },
 }
 

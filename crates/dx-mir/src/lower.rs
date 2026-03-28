@@ -213,6 +213,8 @@ impl Lowerer {
                 callee,
                 args,
             } => {
+                let callee_ty = callee.ty.clone();
+                let call_effects = self.call_effects(target, &callee_ty);
                 let (mut current_bb, callee) =
                     self.lower_expr_operand_in_block(callee, builder, current_bb, env);
                 let mut lowered_args = Vec::with_capacity(args.len());
@@ -244,15 +246,19 @@ impl Lowerer {
                             callee,
                             args: lowered_args,
                             ty: expr.ty.clone(),
+                            effects: call_effects,
                         },
                     },
                 );
                 current_bb
             }
             typed::ExprKind::Closure { params, body } => {
-                let return_type = match body.as_ref() {
-                    typed::ClosureBody::Expr(expr) => expr.ty.clone(),
-                    typed::ClosureBody::Block(block) => block.ty.clone(),
+                let (return_type, effects) = match &expr.ty {
+                    Type::Function { ret, effects, .. } => ((**ret).clone(), effects.clone()),
+                    _ => match body.as_ref() {
+                        typed::ClosureBody::Expr(expr) => (expr.ty.clone(), Vec::new()),
+                        typed::ClosureBody::Block(block) => (block.ty.clone(), Vec::new()),
+                    },
                 };
                 builder.push_statement(
                     current_bb,
@@ -261,6 +267,7 @@ impl Lowerer {
                         value: mir::Rvalue::Closure {
                             param_types: params.iter().map(|p| p.ty.clone()).collect(),
                             return_type,
+                            effects,
                         },
                     },
                 );
@@ -423,6 +430,30 @@ impl Lowerer {
 
         join_bb
     }
+
+    fn call_effects(&self, target: &typed::CallTarget, callee_type: &Type) -> Vec<String> {
+        let mut effects = Vec::new();
+        if let Type::Function { effects: call_fx, .. } = callee_type {
+            for effect in call_fx {
+                if !effects.contains(effect) {
+                    effects.push(effect.clone());
+                }
+            }
+        }
+        match target {
+            typed::CallTarget::PythonFunction { .. }
+            | typed::CallTarget::PythonMember { .. }
+            | typed::CallTarget::PythonDynamic => {
+                if !effects.iter().any(|effect| effect == "py") {
+                    effects.push("py".to_string());
+                }
+            }
+            typed::CallTarget::NativeFunction { .. }
+            | typed::CallTarget::LocalClosure { .. }
+            | typed::CallTarget::Dynamic => {}
+        }
+        effects
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -572,13 +603,14 @@ mod tests {
         match &module.items[1] {
             mir::Item::Function(function) => match &function.blocks[0].statements[0] {
                 mir::Statement::Assign { value, .. } => match value {
-                    mir::Rvalue::Call { target, .. } => {
+                    mir::Rvalue::Call { target, effects, .. } => {
                         assert_eq!(
                             target,
                             &typed::CallTarget::PythonFunction {
                                 name: "read_csv".to_string()
                             }
                         );
+                        assert_eq!(effects, &vec!["py".to_string()]);
                     }
                     other => panic!("expected call rvalue, got {other:?}"),
                 },
@@ -607,6 +639,28 @@ mod tests {
                     )
                 });
                 assert!(found, "expected Python member call target in block 0");
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preserves_closure_effects() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    lazy read_csv(path)\n.\n",
+        );
+        match &module.items[1] {
+            mir::Item::Function(function) => {
+                let found = function.blocks[0].statements.iter().any(|stmt| {
+                    matches!(
+                        stmt,
+                        mir::Statement::Assign {
+                            value: mir::Rvalue::Closure { effects, return_type, .. },
+                            ..
+                        } if effects == &vec!["py".to_string()] && return_type == &Type::PyObj
+                    )
+                });
+                assert!(found, "expected closure with preserved py effect");
             }
             other => panic!("expected function, got {other:?}"),
         }
