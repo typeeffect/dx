@@ -436,11 +436,16 @@ Examples:
 - `(Int, Int) -> Int`
 - `() -> Str`
 - `() -> Str !io`
+- `lazy Str`
+- `lazy Str !io`
 
 Important design rule:
 
 - zero-ary closures are written with `lazy`
-- but their types are still written as `() -> T` with effects where needed
+- zero-ary parameter types may also be written as `lazy T`
+- `lazy T` is source sugar for `() -> T`
+- `lazy T !effects` is source sugar for `() -> T !effects`
+- normalized internal representation still uses ordinary function types
 
 ### Tensor direction
 

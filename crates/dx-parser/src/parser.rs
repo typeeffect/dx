@@ -107,6 +107,16 @@ impl Parser {
     }
 
     fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
+        if self.at_keyword(Keyword::Lazy) {
+            self.bump();
+            let ret = Box::new(self.parse_type_expr()?);
+            let effects = self.parse_effects()?;
+            return Ok(TypeExpr::Function {
+                params: Vec::new(),
+                ret,
+                effects,
+            });
+        }
         if self.at(TokenKind::LParen) {
             self.bump();
             let mut params = Vec::new();
@@ -516,6 +526,33 @@ fun demo() -> Unit:
         match &module.items[0] {
             Item::Function(function) => {
                 assert_eq!(function.body.len(), 3);
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_lazy_type_shorthand_in_params() {
+        let src = r#"
+fun debug(enabled: Bool, msg: lazy Str !io) -> Unit !io:
+    print(msg())
+.
+"#;
+        let tokens = Lexer::new(src).tokenize();
+        let mut parser = Parser::new(tokens);
+        let module = parser.parse_module().expect("module should parse");
+        match &module.items[0] {
+            Item::Function(function) => {
+                assert_eq!(function.params.len(), 2);
+                assert_eq!(function.effects, vec!["io"]);
+                assert_eq!(
+                    function.params[1].ty,
+                    TypeExpr::Function {
+                        params: vec![],
+                        ret: Box::new(TypeExpr::Name("Str".to_string())),
+                        effects: vec!["io".to_string()],
+                    }
+                );
             }
             other => panic!("expected function, got {other:?}"),
         }

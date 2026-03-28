@@ -298,12 +298,16 @@ orders'filter(x => x'total > 100)
 (A, B) -> C
 () -> T
 () -> T !io
+lazy T
+lazy T !io
 ```
 
 Notes:
 
 - zero-ary closures are typed as ordinary function types
-- only the source syntax is special (`lazy`)
+- `lazy T` is source-level shorthand for `() -> T`
+- `lazy T !effects` is source-level shorthand for `() -> T !effects`
+- normalized internal representation still uses ordinary function types
 
 ### 4.3 Type annotations
 
@@ -389,6 +393,7 @@ Examples:
 - `lazy 1 + 2 : () -> Int`
 - `lazy read_text(path) : () -> Str !io`
 - `lazy py'pandas'read_csv(path) : () -> PyObj !py !throw`
+- `msg: lazy Str !io` is surface shorthand for `msg: () -> Str !io`
 
 ## 7. Python Interop
 
@@ -493,6 +498,17 @@ the checker:
 
 1. checks `expr`
 2. forms the type `() -> T !effects(expr)`
+
+For source-level type annotations:
+
+```dx
+msg: lazy Str !io
+```
+
+the checker:
+
+1. parses the surface type as a lazy zero-ary thunk type
+2. normalizes it to `() -> Str !io` before ordinary type checking
 
 ### 9.4 Placeholder lifting
 

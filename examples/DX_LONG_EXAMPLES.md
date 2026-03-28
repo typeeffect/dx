@@ -34,7 +34,7 @@ fun active_emails(path: Str) -> List[Str] !py !throw:
 ## 3. Logging with `lazy`
 
 ```dx
-fun debug(enabled: Bool, msg: () -> Str !io) -> Unit !io:
+fun debug(enabled: Bool, msg: lazy Str !io) -> Unit !io:
     if enabled:
         print(msg())
     else:
@@ -111,7 +111,7 @@ fun city(user: User) -> Str:
 ## 10. Zero-ary block closure
 
 ```dx
-fun cache_or_compute(key: Str, compute: () -> Value !io) -> Value !io:
+fun cache_or_compute(key: Str, compute: lazy Value !io) -> Value !io:
     if cache'has(key):
         cache'get(key)
     else:
@@ -275,7 +275,7 @@ fun gross(lines: List[Line]) -> List[Money]:
 ## 23. Deferred fallback
 
 ```dx
-fun get_or_else[T](opt: Option[T], fallback: () -> T) -> T:
+fun get_or_else[T](opt: Option[T], fallback: lazy T) -> T:
     match opt:
         Some(x):
             x

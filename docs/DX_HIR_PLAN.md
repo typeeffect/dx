@@ -16,6 +16,7 @@ The main purpose of HIR is to remove surface sugar early and make the rest of th
 After HIR lowering, the compiler should no longer need to reason directly about:
 
 - `lazy` source syntax
+- `lazy T` source syntax in type positions
 - placeholder `_` syntax
 - trailing closure surface syntax
 - `it` as an implicit temporary
@@ -82,6 +83,7 @@ Rule:
 
 - HIR does not preserve `lazy` as a special syntax form
 - it becomes the same callable family as other closures, but with zero parameters
+- `lazy T !effects` in type positions is normalized to `() -> T !effects`
 
 ## 2. Placeholder `_`
 
