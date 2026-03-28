@@ -23,6 +23,29 @@ At this stage, development should be driven by:
 
 No parallel experimental frontends should be introduced unless the current plan proves insufficient.
 
+## Current Status
+
+The bootstrap compiler pipeline now exists end-to-end up to the pre-LLVM runtime layer.
+
+Current implemented path:
+
+1. lexer
+2. parser
+3. AST
+4. HIR
+5. type/effect checked HIR
+6. MIR
+7. runtime boundary plans
+8. unified runtime ops plan
+
+This means the project is no longer in "frontend bootstrap only" mode.
+The current implementation focus is backend preparation:
+
+- runtime ABI
+- throw/error boundary modeling
+- closure environment/runtime shape
+- LLVM lowering
+
 ## Compiler Pipeline
 
 The intended pipeline is:
@@ -98,6 +121,10 @@ MIR should be the first representation that is truly codegen-oriented.
 
 ## Milestone 1: Lexer and Core Parser
 
+Status:
+
+- complete
+
 Goal:
 
 - parse the stable v0.1 core surface
@@ -124,6 +151,10 @@ Exit criteria:
 
 ## Milestone 2: AST Freeze
 
+Status:
+
+- effectively complete for the v0.1 bootstrap subset
+
 Goal:
 
 - stabilize the AST enough that downstream work can begin
@@ -142,6 +173,10 @@ Exit criteria:
 
 ## Milestone 3: HIR and Desugaring
 
+Status:
+
+- complete
+
 Goal:
 
 - create a normalized semantic surface
@@ -158,6 +193,10 @@ Exit criteria:
 - checker runs only on HIR, not raw AST
 
 ## Milestone 4: Name Resolution and Bindings
+
+Status:
+
+- complete
 
 Goal:
 
@@ -178,6 +217,10 @@ Exit criteria:
 - `val` vs `var` tracked semantically
 
 ## Milestone 5: Initial Type Checker
+
+Status:
+
+- complete for the current v0.1 core
 
 Goal:
 
@@ -200,6 +243,10 @@ Exit criteria:
 
 ## Milestone 6: Effect Checker
 
+Status:
+
+- complete in initial operational form
+
 Goal:
 
 - make effects operational in the compiler
@@ -219,6 +266,10 @@ Exit criteria:
 
 ## Milestone 7: Python Boundary
 
+Status:
+
+- complete as a checked compiler feature
+
 Goal:
 
 - make `dx -> py` a real checked feature
@@ -236,6 +287,10 @@ Exit criteria:
 - boundary survives lowering without becoming ad hoc
 
 ## Milestone 8: MIR
+
+Status:
+
+- complete as the first backend-oriented IR
 
 Goal:
 
@@ -255,6 +310,10 @@ Exit criteria:
 
 ## Milestone 9: Runtime Boundary Layer
 
+Status:
+
+- in progress, advanced
+
 Goal:
 
 - define the minimal runtime surface before LLVM lowering gets large
@@ -271,13 +330,82 @@ Exit criteria:
 
 - codegen does not invent runtime calls ad hoc
 
+Current implemented pieces:
+
+- Python runtime hook plan
+- closure runtime hook plan
+- capture-aware closure lowering
+- unified runtime ops plan
+- MIR/runtime displays and snapshot coverage
+
+Remaining work in this milestone:
+
+- explicit throw/error runtime boundary model
+- extern/runtime symbol table suitable for codegen
+- more concrete ABI shape for closure environments
+- clearer separation of `Result` data lowering vs `!throw` propagation
+
 ## Milestone 10: LLVM Lowering
+
+Status:
+
+- not started as a real backend yet
 
 Goal:
 
 - emit LLVM from MIR plus runtime boundary definitions
 
 This should happen only after the previous milestones exist.
+
+The intended LLVM start point is now:
+
+- MIR
+- unified runtime ops plan
+- runtime hook signatures
+- closure runtime plan
+- explicit error-model policy
+
+LLVM lowering should not decide semantics.
+It should only translate already-fixed runtime operations and data shapes.
+
+## Milestone 11: Throw and Error Boundary
+
+Goal:
+
+- make the modern error model operational in the backend
+
+Included:
+
+- runtime/ABI representation for `!throw`
+- separation of:
+  - `Result` data lowering
+  - `!throw` propagation
+  - `panic` paths
+- Python exception mapping into the runtime boundary layer
+
+Exit criteria:
+
+- the compiler/runtime can represent throw-capable calls without ambiguity
+- LLVM work does not have to invent exception semantics ad hoc
+
+## Milestone 12: First End-to-End Codegen Skeleton
+
+Goal:
+
+- prove one stable path from typed source to low-level callable form
+
+Included:
+
+- function signature lowering
+- runtime hook extern lowering
+- lowering of Python runtime ops
+- lowering of closure create/call/thunk-call ops
+- smoke tests on low-level emitted structure
+
+Exit criteria:
+
+- one narrow but real codegen path exists
+- runtime operations survive lowering intact
 
 ## What To Defer
 
@@ -293,25 +421,25 @@ Until the above milestones are stable, defer:
 
 These remain important, but they must land on top of a stable pipeline.
 
-## First Concrete Task List
+## Immediate Next Task List
 
 Immediate next tasks:
 
-1. finish parsing `if`
-2. finish parsing `match`
-3. add minimal expression precedence for basic operators
-4. freeze AST for Milestone 2
-5. create an HIR crate or module
-6. implement desugaring for `lazy`, `_`, and `it`
+1. define extern/runtime symbol tables for unified runtime ops
+2. make `!throw` explicit in the runtime boundary layer
+3. separate `Result` lowering from throw-capable call lowering
+4. stabilize closure environment ABI shape enough for codegen
+5. introduce the first LLVM lowering skeleton for runtime ops
+6. add end-to-end tests around runtime ops and low-level lowering
 
 ## Success Condition
 
-The first phase is successful when the project has:
+The current phase is successful when the project has:
 
-- a parser that handles the real v0.1 core
-- an AST stable enough to lower
-- a real HIR
-- a basic type/effect checker
-- one explicit path toward MIR and LLVM
+- one stable compiler pipeline from parser to unified runtime ops
+- one explicit backend story for closures
+- one explicit backend story for Python interop
+- one explicit backend story for `!throw`
+- one narrow but real LLVM/codegen skeleton
 
-At that point, the project can grow safely without multiplying representations or compiler variants.
+At that point, higher-level features can land on a compiler architecture that is already backend-safe.
