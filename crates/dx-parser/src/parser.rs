@@ -76,7 +76,7 @@ impl Parser {
             None
         };
         let effects = self.parse_effects()?;
-        self.expect(TokenKind::Colon)?;
+        self.expect_with_context(TokenKind::Colon, Some("after function signature"))?;
         let body = self.parse_block_until_dot()?;
         Ok(FunctionDecl {
             name,
@@ -95,7 +95,7 @@ impl Parser {
         }
         loop {
             let name = self.expect_identifier()?;
-            self.expect(TokenKind::Colon)?;
+            self.expect_with_context(TokenKind::Colon, Some("after parameter name"))?;
             let ty = self.parse_type_expr()?;
             params.push(Param { name, ty });
             if !self.at(TokenKind::Comma) {
@@ -223,13 +223,15 @@ impl Parser {
         self.parse_comparison()
     }
 
-    /// Precedence level: comparisons (`<`, `<=`, `==`) — lowest binary precedence.
+    /// Precedence level: comparisons (`<`, `<=`, `>`, `>=`, `==`) — lowest binary precedence.
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.parse_additive()?;
         loop {
             let op = match self.peek_kind() {
                 Some(TokenKind::Lt) => BinOp::Lt,
                 Some(TokenKind::LtEq) => BinOp::LtEq,
+                Some(TokenKind::Gt) => BinOp::Gt,
+                Some(TokenKind::GtEq) => BinOp::GtEq,
                 Some(TokenKind::EqEq) => BinOp::EqEq,
                 _ => break,
             };
@@ -285,7 +287,7 @@ impl Parser {
     fn parse_if_expr(&mut self) -> Result<Expr, ParseError> {
         self.expect_keyword(Keyword::If)?;
         let cond = self.parse_expr()?;
-        self.expect(TokenKind::Colon)?;
+        self.expect_with_context(TokenKind::Colon, Some("after `if` condition"))?;
         let then_body = self.parse_block_stmts()?;
 
         let mut branches = vec![(cond, then_body)];
@@ -293,14 +295,14 @@ impl Parser {
         while self.at_keyword(Keyword::Elif) {
             self.bump();
             let elif_cond = self.parse_expr()?;
-            self.expect(TokenKind::Colon)?;
+            self.expect_with_context(TokenKind::Colon, Some("after `elif` condition"))?;
             let elif_body = self.parse_block_stmts()?;
             branches.push((elif_cond, elif_body));
         }
 
         let else_branch = if self.at_keyword(Keyword::Else) {
             self.bump();
-            self.expect(TokenKind::Colon)?;
+            self.expect_with_context(TokenKind::Colon, Some("after `else`"))?;
             Some(self.parse_block_stmts()?)
         } else {
             None
@@ -336,7 +338,7 @@ impl Parser {
     fn parse_match_expr(&mut self) -> Result<Expr, ParseError> {
         self.expect_keyword(Keyword::Match)?;
         let scrutinee = self.parse_expr()?;
-        self.expect(TokenKind::Colon)?;
+        self.expect_with_context(TokenKind::Colon, Some("after `match` scrutinee"))?;
 
         let mut arms = Vec::new();
         self.skip_newlines();
@@ -345,7 +347,7 @@ impl Parser {
                 return Err(ParseError::new("unterminated match expression"));
             }
             let pattern = self.parse_pattern()?;
-            self.expect(TokenKind::Colon)?;
+            self.expect_with_context(TokenKind::Colon, Some("after match pattern"))?;
             let body = self.parse_match_arm_body()?;
             arms.push(MatchArm { pattern, body });
             self.skip_newlines();
@@ -536,13 +538,17 @@ impl Parser {
             }
             Some(TokenKind::LParen) => {
                 self.bump();
+                if self.at(TokenKind::RParen) {
+                    self.bump();
+                    return Ok(Expr::Unit);
+                }
                 let expr = self.parse_expr()?;
                 self.expect(TokenKind::RParen)?;
                 Ok(expr)
             }
-            other => Err(ParseError::new(format!(
-                "unexpected token in expression: {:?}",
-                other
+            _ => Err(ParseError::new(format!(
+                "expected expression, found {}",
+                self.describe_current()
             ))),
         }
     }
@@ -573,9 +579,9 @@ impl Parser {
                     Ok(Pattern::Name(name))
                 }
             }
-            other => Err(ParseError::new(format!(
-                "unexpected token in pattern: {:?}",
-                other
+            _ => Err(ParseError::new(format!(
+                "expected pattern (name, `_`, or constructor), found {}",
+                self.describe_current()
             ))),
         }
     }
@@ -653,16 +659,33 @@ impl Parser {
             self.bump();
             Ok(())
         } else {
-            Err(ParseError::new(format!("expected keyword {:?}", keyword)))
+            Err(ParseError::new(format!(
+                "expected `{}`, found {}",
+                keyword_str(&keyword),
+                self.describe_current()
+            )))
         }
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<(), ParseError> {
+        self.expect_with_context(kind, None)
+    }
+
+    fn expect_with_context(
+        &mut self,
+        kind: TokenKind,
+        context: Option<&str>,
+    ) -> Result<(), ParseError> {
         if self.at(kind.clone()) {
             self.bump();
             Ok(())
         } else {
-            Err(ParseError::new(format!("expected token {:?}", kind)))
+            let expected = token_display(&kind);
+            let msg = match context {
+                Some(ctx) => format!("expected {} {}, found {}", expected, ctx, self.describe_current()),
+                None => format!("expected {}, found {}", expected, self.describe_current()),
+            };
+            Err(ParseError::new(msg))
         }
     }
 
@@ -672,9 +695,9 @@ impl Parser {
                 self.bump();
                 Ok(name)
             }
-            other => Err(ParseError::new(format!(
-                "expected identifier, found {:?}",
-                other
+            _ => Err(ParseError::new(format!(
+                "expected identifier, found {}",
+                self.describe_current()
             ))),
         }
     }
@@ -689,10 +712,18 @@ impl Parser {
                 self.bump();
                 Ok("py".to_string())
             }
-            other => Err(ParseError::new(format!(
-                "expected effect name, found {:?}",
-                other
+            _ => Err(ParseError::new(format!(
+                "expected effect name after `!`, found {}",
+                self.describe_current()
             ))),
+        }
+    }
+
+    fn describe_current(&self) -> String {
+        match self.peek_kind() {
+            Some(TokenKind::Eof) | None => "end of input".to_string(),
+            Some(TokenKind::Newline) => "newline".to_string(),
+            Some(kind) => token_display(kind),
         }
     }
 
@@ -704,6 +735,57 @@ impl Parser {
 
     fn peek_kind(&self) -> Option<&TokenKind> {
         self.tokens.get(self.pos).map(|t| &t.kind)
+    }
+}
+
+fn token_display(kind: &TokenKind) -> String {
+    match kind {
+        TokenKind::Colon => "`:`".to_string(),
+        TokenKind::Dot => "`.`".to_string(),
+        TokenKind::Apostrophe => "`'`".to_string(),
+        TokenKind::Arrow => "`->`".to_string(),
+        TokenKind::FatArrow => "`=>`".to_string(),
+        TokenKind::Bang => "`!`".to_string(),
+        TokenKind::Comma => "`,`".to_string(),
+        TokenKind::LParen => "`(`".to_string(),
+        TokenKind::RParen => "`)`".to_string(),
+        TokenKind::Star => "`*`".to_string(),
+        TokenKind::Plus => "`+`".to_string(),
+        TokenKind::Minus => "`-`".to_string(),
+        TokenKind::Lt => "`<`".to_string(),
+        TokenKind::LtEq => "`<=`".to_string(),
+        TokenKind::Gt => "`>`".to_string(),
+        TokenKind::GtEq => "`>=`".to_string(),
+        TokenKind::EqEq => "`==`".to_string(),
+        TokenKind::Underscore => "`_`".to_string(),
+        TokenKind::Equal => "`=`".to_string(),
+        TokenKind::Ellipsis => "`...`".to_string(),
+        TokenKind::Identifier(name) => format!("identifier `{name}`"),
+        TokenKind::Integer(val) => format!("integer `{val}`"),
+        TokenKind::String(val) => format!("string \"{}\"", val),
+        TokenKind::Keyword(kw) => format!("`{}`", keyword_str(kw)),
+        TokenKind::Newline => "newline".to_string(),
+        TokenKind::Eof => "end of input".to_string(),
+        TokenKind::Unknown(c) => format!("unexpected character `{c}`"),
+    }
+}
+
+fn keyword_str(kw: &Keyword) -> &'static str {
+    match kw {
+        Keyword::Fun => "fun",
+        Keyword::If => "if",
+        Keyword::Elif => "elif",
+        Keyword::Else => "else",
+        Keyword::Type => "type",
+        Keyword::Lazy => "lazy",
+        Keyword::Val => "val",
+        Keyword::Var => "var",
+        Keyword::Match => "match",
+        Keyword::From => "from",
+        Keyword::Import => "import",
+        Keyword::Py => "py",
+        Keyword::Me => "me",
+        Keyword::It => "it",
     }
 }
 
@@ -765,72 +847,8 @@ fun demo() -> Unit:
         }
     }
 
-    #[test]
-    fn parses_lazy_type_shorthand_in_params() {
-        let src = r#"
-fun debug(enabled: Bool, msg: lazy Str !io) -> Unit !io:
-    print(msg())
-.
-"#;
-        let tokens = Lexer::new(src).tokenize();
-        let mut parser = Parser::new(tokens);
-        let module = parser.parse_module().expect("module should parse");
-        match &module.items[0] {
-            Item::Function(function) => {
-                assert_eq!(function.params.len(), 2);
-                assert_eq!(function.effects, vec!["io"]);
-                assert_eq!(
-                    function.params[1].ty,
-                    TypeExpr::Function {
-                        params: vec![],
-                        ret: Box::new(TypeExpr::Name("Str".to_string())),
-                        effects: vec!["io".to_string()],
-                    }
-                );
-            }
-            other => panic!("expected function, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parses_match_with_constructor_and_wildcard_patterns() {
-        let src = r#"
-fun unwrap(x: Result) -> Int:
-    match x:
-        Ok(v):
-            v
-        Err(_):
-            0
-    .
-.
-"#;
-        let tokens = Lexer::new(src).tokenize();
-        let mut parser = Parser::new(tokens);
-        let module = parser.parse_module().expect("module should parse");
-        match &module.items[0] {
-            Item::Function(function) => match &function.body[0] {
-                Stmt::Expr(Expr::Match { arms, .. }) => {
-                    assert_eq!(arms.len(), 2);
-                    assert_eq!(
-                        arms[0].pattern,
-                        Pattern::Constructor {
-                            name: "Ok".to_string(),
-                            args: vec![Pattern::Name("v".to_string())],
-                        }
-                    );
-                    assert_eq!(
-                        arms[1].pattern,
-                        Pattern::Constructor {
-                            name: "Err".to_string(),
-                            args: vec![Pattern::Wildcard],
-                        }
-                    );
-                }
-                other => panic!("expected match expression, got {other:?}"),
-            },
-            other => panic!("expected function, got {other:?}"),
-        }
-    }
+    // NOTE: lazy type shorthand in params is tested by lazy_param_type_with_io
+    // NOTE: match with constructor/wildcard patterns is tested by match_nested_constructor_patterns
 
     #[test]
     fn parses_if_with_elif_and_else() {
@@ -1521,24 +1539,308 @@ fun classify(flag: Bool, other: Bool) -> Str:
         assert_eq!(m.items.len(), 3);
     }
 
-    // ── error cases ──────────────────────────────────────────────
+    // ── error cases: blocks ─────────────────────────────────────
 
     #[test]
-    fn error_unterminated_block() {
+    fn error_unterminated_fun_block() {
         let msg = parse_err("fun f():\n    x\n");
         assert!(msg.contains("unterminated"), "got: {msg}");
     }
 
     #[test]
-    fn error_missing_rparen() {
-        let msg = parse_err("fun f(:\n    x\n.\n");
+    fn error_unterminated_fun_block_with_operator() {
+        let msg = parse_err("fun f(a: Int, b: Int) -> Int:\n    a + b\n");
+        assert!(msg.contains("unterminated"), "got: {msg}");
+    }
+
+    #[test]
+    fn error_missing_colon_after_fun_signature() {
+        let msg = parse_err("fun f()\n    x\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: function declarations ───────────────────────
+
+    #[test]
+    fn error_missing_rparen_in_params() {
+        let msg = parse_err("fun f(x: Int:\n    x\n.\n");
         assert!(!msg.is_empty());
     }
 
     #[test]
-    fn error_unterminated_match() {
+    fn error_missing_param_type() {
+        let msg = parse_err("fun f(x):\n    x\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_missing_fun_name() {
+        let msg = parse_err("fun ():\n    1\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_missing_lparen() {
+        let msg = parse_err("fun f:\n    1\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: if / elif / else ────────────────────────────
+
+    #[test]
+    fn error_if_missing_colon() {
+        let msg = parse_err("fun f(x: Bool) -> Int:\n    if x\n        1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_if_missing_dot() {
+        let msg = parse_err("fun f(x: Bool) -> Int:\n    if x:\n        1\n.\n");
+        // The outer fun block dot gets consumed by the if, leaving fun unterminated
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_elif_without_if() {
+        // elif appearing at expression position should fail
+        let msg = parse_err("fun f() -> Int:\n    elif x:\n        1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_else_without_if() {
+        let msg = parse_err("fun f() -> Int:\n    else:\n        1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: match ───────────────────────────────────────
+
+    #[test]
+    fn error_match_missing_colon() {
+        let msg = parse_err("fun f(x: T) -> Int:\n    match x\n        a:\n            1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_match_missing_scrutinee() {
+        let msg = parse_err("fun f() -> Int:\n    match:\n        a:\n            1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_match_arm_missing_colon() {
+        let msg = parse_err("fun f(x: T) -> Int:\n    match x:\n        a\n            1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_match_unterminated() {
         let _msg = parse_err("fun f(x: T) -> Int:\n    match x:\n        a:\n            1\n.\n");
-        // Should still produce some error or parse. Let's just verify it doesn't panic.
+        // Just verify no panic
+    }
+
+    // ── error cases: operators ────────────────────────────────────
+
+    #[test]
+    fn error_trailing_operator() {
+        let msg = parse_err("fun f(a: Int) -> Int:\n    a +\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_leading_operator() {
+        let msg = parse_err("fun f(a: Int) -> Int:\n    * a\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_double_operator() {
+        let msg = parse_err("fun f(a: Int, b: Int) -> Int:\n    a + + b\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_comparison_missing_rhs() {
+        let msg = parse_err("fun f(x: Int) -> Bool:\n    x <\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: lambda ──────────────────────────────────────
+
+    #[test]
+    fn error_fat_arrow_without_params() {
+        let msg = parse_err("fun f() -> Unit:\n    => x\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_block_lambda_unterminated() {
+        let msg = parse_err("fun f() -> Unit:\n    x =>:\n        y\n.\n");
+        // The outer fun's `.` gets consumed by the block lambda, leaving fun unterminated
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: lazy ────────────────────────────────────────
+
+    #[test]
+    fn error_lazy_at_eof() {
+        let msg = parse_err("fun f() -> Unit:\n    lazy\n.\n");
+        // lazy followed by newline then `.` — lazy tries to parse an expression,
+        // sees `.` which is not a valid expression start
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: val / var ───────────────────────────────────
+
+    #[test]
+    fn error_val_missing_equals() {
+        let msg = parse_err("fun f() -> Unit:\n    val x 1\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_val_missing_name() {
+        let msg = parse_err("fun f() -> Unit:\n    val = 1\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_var_missing_equals() {
+        let msg = parse_err("fun f() -> Unit:\n    var x 1\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: imports ─────────────────────────────────────
+
+    #[test]
+    fn error_import_missing_py() {
+        let msg = parse_err("from pandas import read_csv\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_import_missing_module() {
+        let msg = parse_err("from py import read_csv\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_import_missing_import_keyword() {
+        let msg = parse_err("from py pandas read_csv\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_import_missing_names() {
+        let msg = parse_err("from py pandas import\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: expressions ─────────────────────────────────
+
+    #[test]
+    fn error_unclosed_paren() {
+        let msg = parse_err("fun f() -> Int:\n    (1 + 2\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_unexpected_token_in_expression() {
+        let msg = parse_err("fun f() -> Int:\n    :\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_empty_call_args_with_comma() {
+        let msg = parse_err("fun f() -> Unit:\n    g(,)\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: constructor patterns ────────────────────────
+
+    #[test]
+    fn error_constructor_pattern_unclosed_paren() {
+        let msg = parse_err("fun f(x: T) -> Int:\n    match x:\n        Ok(v:\n            v\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_constructor_pattern_nested_unclosed() {
+        let msg = parse_err("fun f(x: T) -> Int:\n    match x:\n        Some(Ok(v):\n            v\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_integer_as_pattern() {
+        let msg = parse_err("fun f(x: T) -> Int:\n    match x:\n        42:\n            1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: lazy param type syntax ──────────────────────
+
+    #[test]
+    fn error_lazy_type_missing_type_name() {
+        // lazy with nothing after it in type position — hits rparen or comma
+        let msg = parse_err("fun f(x: lazy) -> Unit:\n    x()\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_lazy_type_bang_without_effect_name() {
+        let msg = parse_err("fun f(x: lazy T !) -> Unit:\n    x()\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: operators in complex contexts ───────────────
+
+    #[test]
+    fn error_trailing_op_in_if_condition() {
+        let msg = parse_err("fun f(a: Int) -> Int:\n    if a +:\n        1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_trailing_op_in_match_scrutinee() {
+        let msg = parse_err("fun f(a: Int) -> Int:\n    match a +:\n        x:\n            1\n    .\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_trailing_op_in_named_arg() {
+        let msg = parse_err("fun f() -> Unit:\n    foo(key: a +)\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_trailing_op_in_val() {
+        let msg = parse_err("fun f() -> Unit:\n    val x = a *\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_trailing_op_in_lambda_body() {
+        let msg = parse_err("fun f() -> Unit:\n    x => x +\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: paren mismatches ────────────────────────────
+
+    #[test]
+    fn error_unclosed_nested_parens() {
+        let msg = parse_err("fun f() -> Int:\n    ((1 + 2)\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_unclosed_paren_in_call() {
+        let msg = parse_err("fun f(x: X) -> Y:\n    g((x + 1)\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_extra_rparen() {
+        let msg = parse_err("fun f() -> Int:\n    (1 + 2))\n.\n");
+        assert!(!msg.is_empty());
     }
 
     // ── composite: if + match nesting ────────────────────────────
@@ -2181,6 +2483,124 @@ fun classify(flag: Bool, other: Bool) -> Str:
             }
             other => panic!("expected ValBind, got {other:?}"),
         }
+    }
+
+    // ── gt / gte operators ────────────────────────────────────────
+
+    #[test]
+    fn simple_gt() {
+        let m = parse("fun f(x: Int) -> Bool:\n    x > 0\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Gt),
+            other => panic!("expected BinaryOp(Gt), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_gte() {
+        let m = parse("fun f(x: Int) -> Bool:\n    x >= 10\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::GtEq),
+            other => panic!("expected BinaryOp(GtEq), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gt_in_if_condition() {
+        let m = parse("fun f(x: Int) -> Str:\n    if x > 100:\n        \"big\"\n    else:\n        \"small\"\n    .\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::If { branches, .. } => {
+                assert!(matches!(&branches[0].0, Expr::BinaryOp { op: BinOp::Gt, .. }));
+            }
+            other => panic!("expected If, got {other:?}"),
+        }
+    }
+
+    // ── unit literal ─────────────────────────────────────────────
+
+    #[test]
+    fn unit_literal_standalone() {
+        let m = parse("fun f() -> Unit:\n    ()\n.\n");
+        let f = first_fun(&m);
+        assert!(matches!(first_stmt_expr(&f.body), Expr::Unit));
+    }
+
+    #[test]
+    fn unit_literal_in_if_else() {
+        let m = parse("fun f(x: Bool) -> Unit:\n    if x:\n        print(\"hi\")\n    else:\n        ()\n    .\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::If { else_branch, .. } => {
+                let stmts = else_branch.as_ref().unwrap();
+                assert!(matches!(first_stmt_expr(stmts), Expr::Unit));
+            }
+            other => panic!("expected If, got {other:?}"),
+        }
+    }
+
+    // ── improved error messages ──────────────────────────────────
+
+    #[test]
+    fn error_message_if_missing_colon_is_contextual() {
+        let msg = parse_err("fun f(x: Bool) -> Int:\n    if x\n        1\n    .\n.\n");
+        assert!(msg.contains("after `if` condition"), "got: {msg}");
+    }
+
+    #[test]
+    fn error_message_match_missing_colon_is_contextual() {
+        let msg = parse_err("fun f(x: T) -> Int:\n    match x\n        a:\n            1\n    .\n.\n");
+        assert!(msg.contains("after `match` scrutinee"), "got: {msg}");
+    }
+
+    #[test]
+    fn error_message_fun_missing_colon_is_contextual() {
+        let msg = parse_err("fun f()\n    x\n.\n");
+        assert!(msg.contains("after function signature"), "got: {msg}");
+    }
+
+    #[test]
+    fn error_message_expected_expression_is_clear() {
+        let msg = parse_err("fun f() -> Int:\n    :\n.\n");
+        assert!(msg.contains("expected expression"), "got: {msg}");
+    }
+
+    #[test]
+    fn error_message_expected_pattern_is_clear() {
+        let msg = parse_err("fun f(x: T) -> Int:\n    match x:\n        42:\n            1\n    .\n.\n");
+        assert!(msg.contains("expected pattern"), "got: {msg}");
+    }
+
+    // ── error cases: unit literal ────────────────────────────────
+
+    #[test]
+    fn error_unit_literal_with_content() {
+        let msg = parse_err("fun f() -> Unit:\n    (,)\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: named arguments ─────────────────────────────
+
+    #[test]
+    fn error_named_arg_missing_value() {
+        let msg = parse_err("fun f() -> Unit:\n    g(key:)\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn error_named_arg_missing_comma() {
+        let msg = parse_err("fun f() -> Unit:\n    g(a: 1 b: 2)\n.\n");
+        assert!(!msg.is_empty());
+    }
+
+    // ── error cases: operators in nested contexts ────────────────
+
+    #[test]
+    fn error_operator_in_match_arm_body_unterminated() {
+        let msg = parse_err("fun f(x: T) -> Int:\n    match x:\n        a:\n            a +\n    .\n.\n");
+        assert!(!msg.is_empty());
     }
 
     // ── full example: recursive factorial ────────────────────────

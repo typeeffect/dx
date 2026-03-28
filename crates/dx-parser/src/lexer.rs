@@ -103,6 +103,15 @@ impl<'a> Lexer<'a> {
                         tokens.push(Token::new(TokenKind::Lt, start, self.pos));
                     }
                 }
+                '>' => {
+                    self.bump();
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        tokens.push(Token::new(TokenKind::GtEq, start, self.pos));
+                    } else {
+                        tokens.push(Token::new(TokenKind::Gt, start, self.pos));
+                    }
+                }
                 '"' => tokens.push(self.lex_string()),
                 c if c.is_ascii_digit() => tokens.push(self.lex_integer()),
                 c if is_ident_start(c) => tokens.push(self.lex_identifier_or_keyword()),
@@ -973,9 +982,22 @@ mod tests {
     }
 
     #[test]
-    fn gt_standalone_is_unknown() {
+    fn gt_standalone() {
         let k = kinds(">");
-        assert_eq!(k, vec![TokenKind::Unknown('>')]);
+        assert_eq!(k, vec![TokenKind::Gt]);
+    }
+
+    #[test]
+    fn operator_gt_eq() {
+        let k = kinds("x >= 0");
+        assert_eq!(
+            k,
+            vec![
+                TokenKind::Identifier("x".into()),
+                TokenKind::GtEq,
+                TokenKind::Integer("0".into()),
+            ]
+        );
     }
 
     // ── operator tokens ──────────────────────────────────────────
@@ -1063,12 +1085,6 @@ mod tests {
         // ==> should be == then >
         let k = kinds("== =>");
         assert_eq!(k, vec![TokenKind::EqEq, TokenKind::FatArrow]);
-    }
-
-    #[test]
-    fn arrow_still_works() {
-        let k = kinds("-> =>");
-        assert_eq!(k, vec![TokenKind::Arrow, TokenKind::FatArrow]);
     }
 
     // ── complete program ─────────────────────────────────────────

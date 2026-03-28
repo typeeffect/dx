@@ -244,10 +244,10 @@ fun f(p: Str) -> Unit:
     debug(1, lazy read_text(p))
 .
 
-## ── examples from DX_LONG_EXAMPLES.md (operator-free fragments) ──
+## ── examples from DX_LONG_EXAMPLES.md ────────────────────────────
 
 --- ex10_cache_pattern
-## From example 10: zero-ary block closure (first function only, no operators)
+## From example 10: zero-ary block closure (first function)
 fun cache_or_compute(key: Str, compute: lazy Value !io) -> Value !io:
     if cache'has(key):
         cache'get(key)
@@ -259,7 +259,7 @@ fun cache_or_compute(key: Str, compute: lazy Value !io) -> Value !io:
 .
 
 --- ex23_deferred_fallback_simplified
-## From example 23: deferred fallback (without generic type parameters)
+## From example 23: deferred fallback (simplified, no generics)
 fun get_or_else(opt: Opt, fallback: lazy T) -> T:
     match opt:
         Some(x):
@@ -274,7 +274,7 @@ fun load_name(user: User) -> Str:
 .
 
 --- ex3_lazy_thunk_param_if
-## From example 3: logging with lazy (simplified, no string concat)
+## From example 3: logging with lazy
 fun debug(enabled: Bool, msg: lazy Str !io) -> Unit !io:
     if enabled:
         print(msg())
@@ -493,7 +493,7 @@ fun f(key: Str, compute: lazy Value !io, fallback: lazy Value) -> Value !io:
     compute()
 .
 
-## ── operator expressions (newly parseable) ───────────────────────
+## ── operator expressions ─────────────────────────────────────────
 
 --- binary_operators
 ## Example 1: recursive function with arithmetic and comparison
@@ -509,16 +509,6 @@ fun fact(n: Int) -> Int:
 ## String concatenation with +
 fun full_name() -> Str:
     me'first + " " + me'last
-.
-
---- arithmetic_in_if_condition
-## Binary operators in if conditions
-fun fact2(n: Int) -> Int:
-    if n <= 1:
-        1
-    else:
-        n * fact2(n - 1)
-    .
 .
 
 --- operator_in_lambda_body
@@ -555,20 +545,32 @@ fun younger(a: User, b: User) -> Bool:
     a'age < b'age
 .
 
---- mixed_arithmetic_precedence
-## Precedence: * binds tighter than +
-fun f(a: Int, b: Int, c: Int) -> Int:
-    a + b * c
-.
-
---- equality_check
-## Equality in a condition
-fun is_zero(x: Int) -> Bool:
-    x == 0
-.
-
---- subtraction_in_recursive_call
-## Subtraction in call argument
-fun f(n: Int) -> Int:
+--- operators_in_full_example
+## Combined: precedence, member access, call args, string concat
+fun process(n: Int, user: User) -> Str:
+    val result = n * 2 + 1
+    val name = me'first + " " + me'last
+    val check = user'age < n
     f(n - 1)
+    name
+.
+
+--- unit_literal
+## () as a unit value expression
+fun f(x: Bool) -> Unit:
+    if x:
+        print("hi")
+    else:
+        ()
+    .
+.
+
+--- gt_and_gte_operators
+## > and >= comparison operators
+fun f(x: Int) -> Bool:
+    if x > 100:
+        x >= 200
+    else:
+        x > 0
+    .
 .

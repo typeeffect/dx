@@ -70,12 +70,3 @@ fun f(path: Str) -> PyObj !py !throw:
     read_csv(path)
 .
 
---- unit_literal
-## () as a unit value expression (needs parser support for empty parens)
-fun f(x: Bool) -> Unit:
-    if x:
-        print("hi")
-    else:
-        ()
-    .
-.

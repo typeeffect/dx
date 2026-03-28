@@ -78,6 +78,7 @@ pub enum Expr {
         arms: Vec<MatchArm>,
     },
     Placeholder,
+    Unit,
     BinaryOp {
         op: BinOp,
         lhs: Box<Expr>,
@@ -92,6 +93,8 @@ pub enum BinOp {
     Mul,
     Lt,
     LtEq,
+    Gt,
+    GtEq,
     EqEq,
 }
 

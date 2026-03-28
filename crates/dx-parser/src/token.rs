@@ -36,6 +36,8 @@ pub enum TokenKind {
     Minus,
     Lt,
     LtEq,
+    Gt,
+    GtEq,
     EqEq,
     Underscore,
     Equal,
