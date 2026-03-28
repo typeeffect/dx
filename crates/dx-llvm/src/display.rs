@@ -283,6 +283,98 @@ mod tests {
         assert!(out.contains("define ptr @b("), "got:\n{out}");
     }
 
+    // ── terminators ──────────────────────────────────────────────
+
+    #[test]
+    fn snapshot_ret_with_value() {
+        let out = render("fun f(x: Int) -> Int:\n    x\n.\n");
+        // Should contain a ret instruction in some block
+        assert!(out.contains("ret "), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_ret_void_signature() {
+        // fun f() with no declared return type has void signature
+        // but the body still returns a value (the lowering uses the body result)
+        let out = render("fun f():\n    42\n.\n");
+        assert!(out.contains("define void @f()"), "got:\n{out}");
+        assert!(out.contains("ret "), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_br_and_condbr_in_if() {
+        let out = render(
+            "fun f(x: Bool) -> Int:\n    if x:\n        1\n    else:\n        2\n    .\n.\n",
+        );
+        // Should have conditional branch and unconditional branches (goto -> join block)
+        assert!(out.contains("br "), "got:\n{out}");
+        assert!(out.contains("label %"), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_match_terminator() {
+        let out = render(
+            "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        Err(_):\n            0\n    .\n.\n",
+        );
+        assert!(out.contains("match "), "got:\n{out}");
+        assert!(out.contains("else %"), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_blocks_with_only_terminator() {
+        // then/else branches of if typically have no runtime calls, just terminators
+        let out = render(
+            "fun f(x: Bool) -> Int:\n    if x:\n        1\n    else:\n        2\n    .\n.\n",
+        );
+        // Multiple blocks should be visible with labels
+        let block_count = out.lines().filter(|l| l.ends_with(':')).count();
+        assert!(block_count >= 3, "expected >=3 blocks for if/else, got {block_count}:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_block_ordering_stable() {
+        let src = "fun f(x: Bool) -> Int:\n    if x:\n        1\n    else:\n        2\n    .\n.\n";
+        let out = render(src);
+        let labels: Vec<&str> = out
+            .lines()
+            .filter(|l| l.ends_with(':') && !l.starts_with("declare") && !l.starts_with("define"))
+            .collect();
+        // Labels should be in ascending bb order
+        for i in 1..labels.len() {
+            assert!(
+                labels[i] > labels[i - 1],
+                "blocks out of order: {:?}",
+                labels
+            );
+        }
+    }
+
+    // ── unreachable terminator ─────────────────────────────────
+
+    #[test]
+    fn snapshot_unreachable_via_unit_render() {
+        // A standalone unit-type render with render_terminator
+        use crate::llvm::Terminator;
+        let out = render_terminator(&Terminator::Unreachable);
+        assert_eq!(out, "unreachable");
+    }
+
+    // ── throw-boundary comment format ────────────────────────────
+
+    #[test]
+    fn snapshot_throw_boundary_comment_format() {
+        // Document the current format of throw-boundary comments
+        // (uses Debug formatting from lower.rs which we cannot change)
+        let out = render(
+            "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py !throw:\n    read_csv(path)\n.\n",
+        );
+        // The comment includes "throw-boundary=PythonFunction" (Debug format)
+        assert!(
+            out.contains("throw-boundary=PythonFunction"),
+            "throw-boundary comment should be present:\n{out}"
+        );
+    }
+
     // ── determinism ──────────────────────────────────────────────
 
     #[test]
