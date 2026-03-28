@@ -441,6 +441,42 @@ mod tests {
     }
 
     #[test]
+    fn emits_real_ir_for_python_function_runtime_call() {
+        let module = llvm_module(
+            "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n",
+        );
+        let ir = emit_module(&module).expect("emit");
+        assert!(ir.contains("declare ptr @dx_rt_py_call_function(ptr, i64)"), "got:\n{ir}");
+        assert!(ir.contains("@.str0 = private unnamed_addr constant [9 x i8] c\"read_csv\\00\""), "got:\n{ir}");
+        assert!(ir.contains("call ptr @dx_rt_py_call_function("), "got:\n{ir}");
+        assert!(ir.contains("ptr %t"), "expected lowered string global gep arg:\n{ir}");
+        assert!(ir.contains("i64 1"), "expected arg count:\n{ir}");
+    }
+
+    #[test]
+    fn emits_real_ir_for_python_method_runtime_call() {
+        let module = llvm_module(
+            "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)'head()\n.\n",
+        );
+        let ir = emit_module(&module).expect("emit");
+        assert!(ir.contains("declare ptr @dx_rt_py_call_method(ptr, ptr, i64)"), "got:\n{ir}");
+        assert!(ir.contains("c\"head\\00\""), "expected method name global:\n{ir}");
+        assert!(ir.contains("call ptr @dx_rt_py_call_method("), "got:\n{ir}");
+        assert!(ir.contains("i64 0"), "expected method arg count:\n{ir}");
+    }
+
+    #[test]
+    fn emits_real_ir_for_python_dynamic_runtime_call() {
+        let module = llvm_module(
+            "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val g = read_csv(path)\n    g()\n.\n",
+        );
+        let ir = emit_module(&module).expect("emit");
+        assert!(ir.contains("declare ptr @dx_rt_py_call_dynamic(ptr, i64)"), "got:\n{ir}");
+        assert!(ir.contains("call ptr @dx_rt_py_call_dynamic("), "got:\n{ir}");
+        assert!(ir.contains("i64 0"), "expected dynamic arg count:\n{ir}");
+    }
+
+    #[test]
     fn rejects_match_for_now() {
         let module = llvm_module(
             "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        _:\n            0\n    .\n.\n",
