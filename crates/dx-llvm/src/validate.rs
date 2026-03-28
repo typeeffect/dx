@@ -80,15 +80,22 @@ fn validate_function(
     }
 
     let mut defined_registers = BTreeSet::new();
+    let mut register_types = HashMap::new();
     let mut pack_env_registers = BTreeSet::new();
     for param in &function.params {
         defined_registers.insert(param.name.clone());
+        register_types.insert(param.name.clone(), param.ty.clone());
     }
 
     for block in &function.blocks {
         for instr in &block.instructions {
             match instr {
                 Instruction::Assign { result, .. } | Instruction::BinaryOp { result, .. } => {
+                    let ty = match instr {
+                        Instruction::Assign { ty, .. } | Instruction::BinaryOp { ty, .. } => ty.clone(),
+                        _ => unreachable!(),
+                    };
+                    register_types.insert(result.clone(), ty);
                     if !defined_registers.insert(result.clone()) {
                         diagnostics.push(ValidationDiagnostic {
                             function: Some(function.name.clone()),
@@ -99,6 +106,7 @@ fn validate_function(
                 }
                 Instruction::PackEnv { result, .. } => {
                     pack_env_registers.insert(result.clone());
+                    register_types.insert(result.clone(), Type::Ptr);
                     if !defined_registers.insert(result.clone()) {
                         diagnostics.push(ValidationDiagnostic {
                             function: Some(function.name.clone()),
@@ -109,6 +117,11 @@ fn validate_function(
                 }
                 Instruction::CallExtern { result, .. } => {
                     if let Some(result) = result {
+                        let ret = match instr {
+                            Instruction::CallExtern { ret, .. } => ret.clone(),
+                            _ => unreachable!(),
+                        };
+                        register_types.insert(result.clone(), ret);
                         if !defined_registers.insert(result.clone()) {
                             diagnostics.push(ValidationDiagnostic {
                                 function: Some(function.name.clone()),
@@ -126,7 +139,14 @@ fn validate_function(
         for instr in &block.instructions {
             match instr {
                 Instruction::Assign { ty, value, .. } => {
-                    validate_operand_defined(value, &defined_registers, function, block, diagnostics);
+                    validate_operand_defined(
+                        value,
+                        &defined_registers,
+                        &register_types,
+                        function,
+                        block,
+                        diagnostics,
+                    );
                     validate_operand_global(value, global_symbols, function, block, diagnostics);
                     if operand_type(value) != *ty {
                         diagnostics.push(ValidationDiagnostic {
@@ -141,8 +161,22 @@ fn validate_function(
                     }
                 }
                 Instruction::BinaryOp { op, ty, lhs, rhs, .. } => {
-                    validate_operand_defined(lhs, &defined_registers, function, block, diagnostics);
-                    validate_operand_defined(rhs, &defined_registers, function, block, diagnostics);
+                    validate_operand_defined(
+                        lhs,
+                        &defined_registers,
+                        &register_types,
+                        function,
+                        block,
+                        diagnostics,
+                    );
+                    validate_operand_defined(
+                        rhs,
+                        &defined_registers,
+                        &register_types,
+                        function,
+                        block,
+                        diagnostics,
+                    );
                     validate_operand_global(lhs, global_symbols, function, block, diagnostics);
                     validate_operand_global(rhs, global_symbols, function, block, diagnostics);
                     validate_binary_op(op, ty, lhs, rhs, function, block, diagnostics);
@@ -152,6 +186,7 @@ fn validate_function(
                         validate_operand_defined(
                             capture,
                             &defined_registers,
+                            &register_types,
                             function,
                             block,
                             diagnostics,
@@ -208,6 +243,7 @@ fn validate_function(
                             validate_operand_defined(
                                 arg,
                                 &defined_registers,
+                                &register_types,
                                 function,
                                 block,
                                 diagnostics,
@@ -251,6 +287,7 @@ fn validate_function(
             block,
             &block_labels,
             &defined_registers,
+            &register_types,
             global_symbols,
             diagnostics,
         );
@@ -379,6 +416,7 @@ fn validate_binary_op(
 fn validate_operand_defined(
     operand: &Operand,
     defined_registers: &BTreeSet<String>,
+    register_types: &HashMap<String, Type>,
     function: &Function,
     block: &crate::llvm::Block,
     diagnostics: &mut Vec<ValidationDiagnostic>,
@@ -390,6 +428,19 @@ fn validate_operand_defined(
                 block: Some(block.label.clone()),
                 message: format!("use of undefined register '{}'", name),
             });
+        } else if let Some(expected) = register_types.get(name) {
+            if operand_type(operand) != *expected {
+                diagnostics.push(ValidationDiagnostic {
+                    function: Some(function.name.clone()),
+                    block: Some(block.label.clone()),
+                    message: format!(
+                        "register '{}' used with type {:?}, but defined as {:?}",
+                        name,
+                        operand_type(operand),
+                        expected
+                    ),
+                });
+            }
         }
     }
 }
@@ -439,13 +490,21 @@ fn validate_terminator(
     block: &crate::llvm::Block,
     block_labels: &BTreeSet<String>,
     defined_registers: &BTreeSet<String>,
+    register_types: &HashMap<String, Type>,
     global_symbols: &BTreeSet<String>,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     match &block.terminator {
         Terminator::Ret(value) => match value {
             Some(value) if operand_type(value) != function.ret => {
-                validate_operand_defined(value, defined_registers, function, block, diagnostics);
+                validate_operand_defined(
+                    value,
+                    defined_registers,
+                    register_types,
+                    function,
+                    block,
+                    diagnostics,
+                );
                 validate_operand_global(value, global_symbols, function, block, diagnostics);
                 diagnostics.push(ValidationDiagnostic {
                     function: Some(function.name.clone()),
@@ -463,7 +522,14 @@ fn validate_terminator(
                 message: format!("missing return value for non-void function returning {:?}", function.ret),
             }),
             Some(value) => {
-                validate_operand_defined(value, defined_registers, function, block, diagnostics);
+                validate_operand_defined(
+                    value,
+                    defined_registers,
+                    register_types,
+                    function,
+                    block,
+                    diagnostics,
+                );
                 validate_operand_global(value, global_symbols, function, block, diagnostics);
             }
             None => {}
@@ -482,7 +548,14 @@ fn validate_terminator(
             then_label,
             else_label,
         } => {
-            validate_operand_defined(cond, defined_registers, function, block, diagnostics);
+            validate_operand_defined(
+                cond,
+                defined_registers,
+                register_types,
+                function,
+                block,
+                diagnostics,
+            );
             validate_operand_global(cond, global_symbols, function, block, diagnostics);
             if operand_type(cond) != Type::I1 {
                 diagnostics.push(ValidationDiagnostic {
@@ -511,7 +584,14 @@ fn validate_terminator(
             arms,
             fallback,
         } => {
-            validate_operand_defined(scrutinee, defined_registers, function, block, diagnostics);
+            validate_operand_defined(
+                scrutinee,
+                defined_registers,
+                register_types,
+                function,
+                block,
+                diagnostics,
+            );
             validate_operand_global(scrutinee, global_symbols, function, block, diagnostics);
             for (_, target) in arms {
                 if !block_labels.contains(target) {
@@ -641,6 +721,40 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("use of undefined register '%missing'")));
+    }
+
+    #[test]
+    fn rejects_register_use_with_wrong_param_type_annotation() {
+        let mut module = valid_module();
+        module.functions[0].blocks[0].instructions = vec![Instruction::CallExtern {
+            result: Some("%1".into()),
+            symbol: "dx_rt_py_call_function",
+            ret: Type::Ptr,
+            args: vec![
+                Operand::Register("%0".into(), Type::I64),
+                Operand::ConstInt(1),
+            ],
+            comment: None,
+        }];
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("register '%0' used with type I64, but defined as Ptr")));
+    }
+
+    #[test]
+    fn rejects_register_use_with_wrong_result_type_annotation() {
+        let mut module = valid_module();
+        module.functions[0].blocks[0].terminator = Terminator::Ret(Some(Operand::Register(
+            "%1".into(),
+            Type::I64,
+        )));
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("register '%1' used with type I64, but defined as Ptr")));
     }
 
     #[test]
