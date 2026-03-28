@@ -245,6 +245,17 @@ fn infer_expr_effects(
             }
             effects
         }
+        hir::Expr::BinaryOp { lhs, rhs, .. } => {
+            let mut effects =
+                infer_expr_effects(lhs, function_effects, imported_py_names, local_closures);
+            effects.extend(infer_expr_effects(
+                rhs,
+                function_effects,
+                imported_py_names,
+                local_closures,
+            ));
+            effects
+        }
     }
 }
 

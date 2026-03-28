@@ -176,6 +176,10 @@ fn resolve_expr(
                 resolve_block(function_name, &arm.body, &mut arm_scope, diagnostics);
             }
         }
+        hir::Expr::BinaryOp { lhs, rhs, .. } => {
+            resolve_expr(function_name, lhs, scope, diagnostics);
+            resolve_expr(function_name, rhs, scope, diagnostics);
+        }
     }
 }
 

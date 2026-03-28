@@ -205,6 +205,11 @@ impl Lowerer {
                     .collect(),
             },
             ast::Expr::Placeholder => unreachable!("placeholder should be lifted before HIR"),
+            ast::Expr::BinaryOp { op, lhs, rhs } => hir::Expr::BinaryOp {
+                op: op.clone(),
+                lhs: Box::new(self.lower_expr(lhs, current_it)),
+                rhs: Box::new(self.lower_expr(rhs, current_it)),
+            },
         }
     }
 
@@ -271,6 +276,9 @@ fn contains_placeholder(expr: &ast::Expr) -> bool {
                 || arms
                     .iter()
                     .any(|arm| stmts_contain_placeholder(&arm.body))
+        }
+        ast::Expr::BinaryOp { lhs, rhs, .. } => {
+            contains_placeholder(lhs) || contains_placeholder(rhs)
         }
         ast::Expr::Name(_) | ast::Expr::Integer(_) | ast::Expr::String(_) => false,
     }
@@ -343,6 +351,11 @@ fn replace_placeholder(expr: &ast::Expr, param_name: &str) -> ast::Expr {
                     body: replace_placeholder_in_stmts(&arm.body, param_name),
                 })
                 .collect(),
+        },
+        ast::Expr::BinaryOp { op, lhs, rhs } => ast::Expr::BinaryOp {
+            op: op.clone(),
+            lhs: Box::new(replace_placeholder(lhs, param_name)),
+            rhs: Box::new(replace_placeholder(rhs, param_name)),
         },
     }
 }
