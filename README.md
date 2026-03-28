@@ -18,6 +18,7 @@ Current focus:
   - Python interop architecture
   - AD / probabilistic programming direction
   - implementation roadmap
+  - parallel development plan
 - `spec/`
   - v0.1 core spec
 - `examples/`
@@ -55,3 +56,4 @@ See also:
 - `docs/PY_INTEROP_ARCHITECTURE.md`
 - `docs/DX_AD_PPL_DIRECTION.md`
 - `docs/DX_IMPLEMENTATION_ROADMAP.md`
+- `docs/PARALLEL_DEVELOPMENT_PLAN.md`
