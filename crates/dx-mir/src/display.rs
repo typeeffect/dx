@@ -1,5 +1,5 @@
 use crate::mir;
-use dx_hir::typed::CallTarget;
+use dx_hir::{typed::CallTarget, Type};
 use std::fmt::Write;
 
 pub fn render_module(module: &mir::Module) -> String {
@@ -25,11 +25,11 @@ pub fn render_function(function: &mir::Function, out: &mut String) {
             write!(out, ", ").unwrap();
         }
         let local = &function.locals[param];
-        write!(out, "{}: {:?}", local.name, local.ty).unwrap();
+        write!(out, "{}: {}", local.name, render_type(&local.ty)).unwrap();
     }
     write!(out, ")").unwrap();
     if let Some(ret) = &function.return_type {
-        write!(out, " -> {:?}", ret).unwrap();
+        write!(out, " -> {}", render_type(ret)).unwrap();
     }
     if !function.effects.is_empty() {
         for effect in &function.effects {
@@ -50,7 +50,7 @@ pub fn render_function(function: &mir::Function, out: &mut String) {
         } else {
             "let"
         };
-        writeln!(out, "  {kind} _{id}: {:?}  // {}", local.ty, local.name).unwrap();
+        writeln!(out, "  {kind} _{id}: {}  // {}", render_type(&local.ty), local.name).unwrap();
     }
     if function.locals.len() > function.params.len() {
         writeln!(out).unwrap();
@@ -140,9 +140,9 @@ fn render_rvalue(rv: &mir::Rvalue, out: &mut String) {
                 if i > 0 {
                     write!(out, ", ").unwrap();
                 }
-                write!(out, "{ty:?}").unwrap();
+                write!(out, "{}", render_type(ty)).unwrap();
             }
-            write!(out, ") -> {return_type:?}").unwrap();
+            write!(out, ") -> {}", render_type(return_type)).unwrap();
             for effect in effects {
                 write!(out, " !{effect}").unwrap();
             }
@@ -226,6 +226,31 @@ fn pattern_str(pattern: &dx_hir::Pattern) -> String {
     }
 }
 
+fn render_type(ty: &Type) -> String {
+    match ty {
+        Type::Int => "Int".to_string(),
+        Type::Float => "Float".to_string(),
+        Type::Bool => "Bool".to_string(),
+        Type::Str => "Str".to_string(),
+        Type::Unit => "Unit".to_string(),
+        Type::PyObj => "PyObj".to_string(),
+        Type::Named(name) => name.clone(),
+        Type::Function {
+            params,
+            ret,
+            effects,
+        } => {
+            let params_str: Vec<String> = params.iter().map(render_type).collect();
+            let mut s = format!("({}) -> {}", params_str.join(", "), render_type(ret));
+            for effect in effects {
+                write!(s, " !{effect}").unwrap();
+            }
+            s
+        }
+        Type::Unknown => "?".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,6 +322,87 @@ mod tests {
         );
         assert!(out.contains("closure("), "got:\n{out}");
     }
+
+    // ── type rendering ────────────────────────────────────────────
+
+    #[test]
+    fn render_type_primitives() {
+        assert_eq!(render_type(&Type::Int), "Int");
+        assert_eq!(render_type(&Type::Str), "Str");
+        assert_eq!(render_type(&Type::Bool), "Bool");
+        assert_eq!(render_type(&Type::Unit), "Unit");
+        assert_eq!(render_type(&Type::PyObj), "PyObj");
+        assert_eq!(render_type(&Type::Unknown), "?");
+        assert_eq!(render_type(&Type::Named("Foo".into())), "Foo");
+    }
+
+    #[test]
+    fn render_type_function() {
+        let ty = Type::Function {
+            params: vec![Type::Int, Type::Str],
+            ret: Box::new(Type::Bool),
+            effects: vec![],
+        };
+        assert_eq!(render_type(&ty), "(Int, Str) -> Bool");
+    }
+
+    #[test]
+    fn render_type_function_with_effects() {
+        let ty = Type::Function {
+            params: vec![],
+            ret: Box::new(Type::PyObj),
+            effects: vec!["py".into(), "throw".into()],
+        };
+        assert_eq!(render_type(&ty), "() -> PyObj !py !throw");
+    }
+
+    // ── locals and temporaries ───────────────────────────────────
+
+    #[test]
+    fn snapshot_locals_and_temps() {
+        let out = render(
+            "fun f(x: Int) -> Int:\n    val y = x + 1\n    y\n.\n",
+        );
+        // params don't show up as locals
+        assert!(out.contains("fn f(x: Int) -> Int"), "got:\n{out}");
+        // y should be a let local
+        assert!(out.contains("let _"), "got:\n{out}");
+        assert!(out.contains("// y"), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_mutable_var() {
+        let out = render(
+            "fun f() -> Int:\n    var x = 1\n    x = 2\n    x\n.\n",
+        );
+        assert!(out.contains("var _"), "got:\n{out}");
+    }
+
+    // ── function type in signature ───────────────────────────────
+
+    #[test]
+    fn snapshot_lazy_param_type() {
+        let out = render(
+            "fun f(compute: lazy Int !io) -> Int !io:\n    compute()\n.\n",
+        );
+        // lazy Int !io normalizes to () -> Int !io
+        assert!(out.contains("() -> Int !io"), "got:\n{out}");
+    }
+
+    // ── Python dynamic call ──────────────────────────────────────
+
+    #[test]
+    fn snapshot_python_dynamic_chain() {
+        let out = render(
+            "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)'head()'values\n.\n",
+        );
+        // Should contain both py call and member access
+        assert!(out.contains("[py:read_csv]"), "got:\n{out}");
+        assert!(out.contains("'head"), "got:\n{out}");
+        assert!(out.contains("'values"), "got:\n{out}");
+    }
+
+    // ── validation + rendering interaction ───────────────────────
 
     #[test]
     fn rendered_mir_round_trips_through_validation() {
