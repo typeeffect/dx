@@ -19,6 +19,7 @@ Current focus:
   - AD / probabilistic programming direction
   - implementation roadmap
   - parallel development plan
+  - HIR plan
 - `spec/`
   - v0.1 core spec
 - `examples/`
@@ -57,3 +58,4 @@ See also:
 - `docs/DX_AD_PPL_DIRECTION.md`
 - `docs/DX_IMPLEMENTATION_ROADMAP.md`
 - `docs/PARALLEL_DEVELOPMENT_PLAN.md`
+- `docs/DX_HIR_PLAN.md`
