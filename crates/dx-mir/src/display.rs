@@ -153,7 +153,14 @@ fn render_rvalue(rv: &mir::Rvalue, out: &mut String) {
                     if i > 0 {
                         write!(out, ", ").unwrap();
                     }
-                    write!(out, "{} <= _{}", capture.name, capture.source).unwrap();
+                    write!(
+                        out,
+                        "{}: {} <= _{}",
+                        capture.name,
+                        render_type(&capture.ty),
+                        capture.source
+                    )
+                    .unwrap();
                 }
                 write!(out, "]").unwrap();
             }
@@ -332,7 +339,7 @@ mod tests {
             "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    lazy read_csv(path)\n.\n",
         );
         assert!(out.contains("closure("), "got:\n{out}");
-        assert!(out.contains("captures [path <="), "got:\n{out}");
+        assert!(out.contains("captures [path: Str <="), "got:\n{out}");
     }
 
     // ── type rendering ────────────────────────────────────────────
