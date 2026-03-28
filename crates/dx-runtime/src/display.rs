@@ -155,6 +155,15 @@ pub fn render_closure_plan(plan: &ClosureRuntimePlan) -> String {
     out
 }
 
+pub fn render_combined_plan(
+    py_plan: &PyRuntimePlan,
+    closure_plan: &ClosureRuntimePlan,
+) -> String {
+    let mut out = render_runtime_plan(py_plan);
+    out.push_str(&render_closure_plan(closure_plan));
+    out
+}
+
 fn render_closure_abi_type(ty: ClosureAbiType) -> &'static str {
     match ty {
         ClosureAbiType::ClosureHandle => "ClosureHandle",
@@ -350,5 +359,94 @@ mod tests {
         assert!(out.contains("Closure Runtime Plan"), "got:\n{out}");
         assert!(!out.contains("creations:"), "got:\n{out}");
         assert!(!out.contains("invocations:"), "got:\n{out}");
+    }
+
+    // ── combined closure + python scenarios ──────────────────────
+
+    #[test]
+    fn combined_closure_capturing_python_result() {
+        // Closure captures a value obtained from a Python call
+        let module = lower(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    val df = read_csv(path)\n    lazy df\n.\n",
+        );
+        let py_plan = build_python_runtime_plan(&module);
+        let cl_plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_combined_plan(&py_plan, &cl_plan);
+
+        // Python side
+        assert!(out.contains("py.call(read_csv)"), "got:\n{out}");
+        assert!(out.contains("dx_rt_py_call_function"), "got:\n{out}");
+        // Closure side
+        assert!(out.contains("dx_rt_closure_create"), "got:\n{out}");
+        assert!(out.contains("captures [df:"), "got:\n{out}");
+    }
+
+    #[test]
+    fn combined_thunk_wrapping_python_call() {
+        // lazy read_csv(path) — thunk that captures path, calling Python when invoked
+        let module = lower(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    lazy read_csv(path)\n.\n",
+        );
+        let py_plan = build_python_runtime_plan(&module);
+        let cl_plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_combined_plan(&py_plan, &cl_plan);
+
+        assert!(out.contains("Python Runtime Plan"), "got:\n{out}");
+        assert!(out.contains("Closure Runtime Plan"), "got:\n{out}");
+        // The closure should have py effects
+        assert!(out.contains("closure() -> PyObj !py"), "got:\n{out}");
+    }
+
+    #[test]
+    fn combined_multiple_closures_in_one_function() {
+        let module = lower(
+            "fun make(x: Int, y: Int) -> lazy Int:\n    val a = lazy x\n    val b = lazy y\n    a\n.\n",
+        );
+        let cl_plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_closure_plan(&cl_plan);
+
+        // Should have 2 closure creations
+        assert!(out.contains("creations:"), "got:\n{out}");
+        // Count occurrences of "closure()" — expect at least 2
+        let closure_count = out.matches("closure() -> Int").count();
+        assert!(closure_count >= 2, "expected >=2 closure() entries, got {closure_count}:\n{out}");
+    }
+
+    #[test]
+    fn combined_multiple_hooks_in_module() {
+        // Module with Python calls and closures together
+        let module = lower(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n\nfun make(x: Int) -> lazy Int:\n    lazy x\n.\n",
+        );
+        let py_plan = build_python_runtime_plan(&module);
+        let cl_plan = crate::closure::build_closure_runtime_plan(&module);
+
+        // Python side has hooks
+        assert!(!py_plan.required_hooks.is_empty());
+        assert!(!py_plan.call_sites.is_empty());
+        // Closure side has hooks
+        assert!(!cl_plan.required_hooks.is_empty());
+        assert!(!cl_plan.creations.is_empty());
+
+        let out = render_combined_plan(&py_plan, &cl_plan);
+        assert!(out.contains("Python Runtime Plan"), "got:\n{out}");
+        assert!(out.contains("Closure Runtime Plan"), "got:\n{out}");
+    }
+
+    #[test]
+    fn combined_thunk_creation_and_invocation_with_python() {
+        // lazy read_csv(path) — the py call is inside the closure body,
+        // which MIR doesn't preserve, so py_plan sees no call sites here.
+        // But the closure plan shows creation + invocation with !py effects.
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py:\n    val thunk = lazy read_csv(path)\n    thunk()\n.\n",
+        );
+        let cl_plan = crate::closure::build_closure_runtime_plan(&module);
+        let out = render_closure_plan(&cl_plan);
+
+        assert!(out.contains("dx_rt_closure_create"), "got:\n{out}");
+        assert!(out.contains("dx_rt_thunk_call"), "got:\n{out}");
+        assert!(out.contains("!py"), "got:\n{out}");
+        assert!(out.contains("captures [path: Str <="), "got:\n{out}");
     }
 }

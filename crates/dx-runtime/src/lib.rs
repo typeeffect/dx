@@ -13,6 +13,6 @@ pub use closure::{
     ClosureRuntimeHookSignature, ClosureRuntimePlan, LoweredClosureCreation,
     LoweredClosureInvocation,
 };
-pub use display::{render_closure_plan, render_lowered_calls, render_runtime_plan};
+pub use display::{render_closure_plan, render_combined_plan, render_lowered_calls, render_runtime_plan};
 pub use lower::{lower_python_runtime_calls, LoweredPyCall, PyDispatchTarget};
 pub use py::{collect_python_call_sites, PyCallKind, PyRuntimeCallSite};
