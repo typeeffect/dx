@@ -31,6 +31,7 @@ pub fn typecheck_module(module: &hir::Module) -> TypeCheckReport {
 
 #[derive(Debug, Clone)]
 struct CallableSig {
+    param_names: Option<Vec<String>>,
     params: Vec<Type>,
     ret: Type,
 }
@@ -124,7 +125,7 @@ impl Checker {
                 Binding {
                     ty: param.ty.clone(),
                     mutable: false,
-                    callable: callable_from_type(&param.ty),
+                    callable: callable_from_param(param),
                 },
             );
         }
@@ -450,17 +451,7 @@ impl Checker {
                 return Type::PyObj;
             }
             if let Some(binding) = scope.lookup(name).and_then(|binding| binding.callable.clone()) {
-                if binding.params.len() != args.len() {
-                    self.diag(
-                        function_name,
-                        format!(
-                            "call to `{}` expects {} args, found {}",
-                            name,
-                            binding.params.len(),
-                            args.len()
-                        ),
-                    );
-                }
+                self.check_call_args(function_name, Some(name), &binding, args);
                 return binding.ret;
             }
         }
@@ -469,16 +460,12 @@ impl Checker {
             params, ret, ..
         } = &callee_typed.ty
         {
-            if params.len() != args.len() {
-                self.diag(
-                    function_name,
-                    format!(
-                        "call expects {} args, found {}",
-                        params.len(),
-                        args.len()
-                    ),
-                );
-            }
+            let sig = CallableSig {
+                param_names: None,
+                params: params.clone(),
+                ret: (**ret).clone(),
+            };
+            self.check_call_args(function_name, None, &sig, args);
             return (**ret).clone();
         }
 
@@ -542,6 +529,134 @@ impl Checker {
         });
     }
 
+    fn check_call_args(
+        &mut self,
+        function_name: &str,
+        callee_name: Option<&str>,
+        sig: &CallableSig,
+        args: &[typed::Arg],
+    ) {
+        let mut seen_named = false;
+        let mut assigned = vec![false; sig.params.len()];
+        let mut positional_index = 0usize;
+
+        for arg in args {
+            match arg {
+                typed::Arg::Positional(expr) => {
+                    if seen_named {
+                        self.diag(
+                            function_name,
+                            format!(
+                                "positional argument cannot appear after named arguments{}",
+                                call_site_suffix(callee_name)
+                            ),
+                        );
+                        continue;
+                    }
+                    if positional_index >= sig.params.len() {
+                        self.diag(
+                            function_name,
+                            format!(
+                                "call{} expects {} args, found {}",
+                                call_site_suffix(callee_name),
+                                sig.params.len(),
+                                args.len()
+                            ),
+                        );
+                        continue;
+                    }
+                    self.check_arg_type(
+                        function_name,
+                        callee_name,
+                        positional_index,
+                        &sig.params[positional_index],
+                        &expr.ty,
+                    );
+                    assigned[positional_index] = true;
+                    positional_index += 1;
+                }
+                typed::Arg::Named { name, value } => {
+                    seen_named = true;
+                    let Some(param_names) = &sig.param_names else {
+                        self.diag(
+                            function_name,
+                            format!(
+                                "call{} uses named arguments, but callee has no parameter names",
+                                call_site_suffix(callee_name)
+                            ),
+                        );
+                        continue;
+                    };
+                    let Some(index) = param_names.iter().position(|param| param == name) else {
+                        self.diag(
+                            function_name,
+                            format!(
+                                "unknown named argument `{}`{}",
+                                name,
+                                call_site_suffix(callee_name)
+                            ),
+                        );
+                        continue;
+                    };
+                    if assigned[index] {
+                        self.diag(
+                            function_name,
+                            format!(
+                                "argument `{}` provided more than once{}",
+                                name,
+                                call_site_suffix(callee_name)
+                            ),
+                        );
+                        continue;
+                    }
+                    self.check_arg_type(
+                        function_name,
+                        callee_name,
+                        index,
+                        &sig.params[index],
+                        &value.ty,
+                    );
+                    assigned[index] = true;
+                }
+            }
+        }
+
+        let provided = assigned.iter().filter(|&&slot| slot).count();
+        if provided != sig.params.len() {
+            self.diag(
+                function_name,
+                format!(
+                    "call{} expects {} args, found {}",
+                    call_site_suffix(callee_name),
+                    sig.params.len(),
+                    provided
+                ),
+            );
+        }
+    }
+
+    fn check_arg_type(
+        &mut self,
+        function_name: &str,
+        callee_name: Option<&str>,
+        index: usize,
+        expected: &Type,
+        actual: &Type,
+    ) {
+        if !compatible_types(expected, actual) {
+            self.diag(
+                function_name,
+                format!(
+                    "argument {}{} expects {:?}, found {:?}",
+                    index + 1,
+                    call_site_suffix(callee_name),
+                    expected,
+                    actual
+                ),
+            );
+        }
+    }
+
     fn classify_call_target(
         &self,
         callee_hir: &hir::Expr,
@@ -588,6 +703,7 @@ fn collect_globals(module: &hir::Module) -> HashMap<String, Binding> {
                             ty: Type::Unknown,
                             mutable: false,
                             callable: Some(CallableSig {
+                                param_names: None,
                                 params: vec![],
                                 ret: Type::PyObj,
                             }),
@@ -612,7 +728,13 @@ fn collect_globals(module: &hir::Module) -> HashMap<String, Binding> {
                             effects: function.effects.clone(),
                         },
                         mutable: false,
-                        callable: Some(CallableSig { params, ret }),
+                        callable: Some(CallableSig {
+                            param_names: Some(
+                                function.params.iter().map(|param| param.name.clone()).collect(),
+                            ),
+                            params,
+                            ret,
+                        }),
                     },
                 );
             }
@@ -637,6 +759,7 @@ fn collect_imported_py_names(module: &hir::Module) -> HashSet<String> {
 fn callable_from_type(ty: &Type) -> Option<CallableSig> {
     match ty {
         Type::Function { params, ret, .. } => Some(CallableSig {
+            param_names: None,
             params: params.clone(),
             ret: (**ret).clone(),
         }),
@@ -644,8 +767,31 @@ fn callable_from_type(ty: &Type) -> Option<CallableSig> {
     }
 }
 
+fn callable_from_param(param: &typed::Param) -> Option<CallableSig> {
+    callable_from_type(&param.ty)
+}
+
 fn callable_from_typed_expr(expr: &typed::Expr) -> Option<CallableSig> {
-    callable_from_type(&expr.ty)
+    match &expr.kind {
+        typed::ExprKind::Closure { params, body } => {
+            let ret = match body.as_ref() {
+                typed::ClosureBody::Expr(expr) => expr.ty.clone(),
+                typed::ClosureBody::Block(block) => block.ty.clone(),
+            };
+            Some(CallableSig {
+                param_names: Some(params.iter().map(|param| param.name.clone()).collect()),
+                params: params.iter().map(|param| param.ty.clone()).collect(),
+                ret,
+            })
+        }
+        _ => callable_from_type(&expr.ty),
+    }
+}
+
+fn call_site_suffix(callee_name: Option<&str>) -> String {
+    callee_name
+        .map(|name| format!(" to `{name}`"))
+        .unwrap_or_default()
 }
 
 fn infer_typed_closure_body_effects(body: &typed::ClosureBody) -> Vec<String> {
@@ -841,6 +987,62 @@ mod tests {
         );
         assert!(report.diagnostics.is_empty());
         match &report.module.items[1] {
+            typed::Item::Function(function) => assert_eq!(function.body.ty, Type::Int),
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reports_argument_type_mismatch_for_named_call() {
+        let report = check(
+            "fun add(a: Int, b: Int) -> Int:\n    a + b\n.\n\nfun use() -> Int:\n    add(a: 1, b: \"x\")\n.\n",
+        );
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(report.diagnostics[0].message.contains("argument 2"));
+        assert!(report.diagnostics[0].message.contains("Int"));
+        assert!(report.diagnostics[0].message.contains("Str"));
+    }
+
+    #[test]
+    fn reports_unknown_named_argument() {
+        let report = check(
+            "fun add(a: Int, b: Int) -> Int:\n    a + b\n.\n\nfun use() -> Int:\n    add(a: 1, c: 2)\n.\n",
+        );
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("unknown named argument `c`")));
+    }
+
+    #[test]
+    fn reports_duplicate_named_argument() {
+        let report = check(
+            "fun add(a: Int, b: Int) -> Int:\n    a + b\n.\n\nfun use() -> Int:\n    add(a: 1, a: 2)\n.\n",
+        );
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("provided more than once")));
+    }
+
+    #[test]
+    fn reports_positional_after_named_argument() {
+        let report = check(
+            "fun add(a: Int, b: Int) -> Int:\n    a + b\n.\n\nfun use() -> Int:\n    add(a: 1, 2)\n.\n",
+        );
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("positional argument cannot appear after named")));
+    }
+
+    #[test]
+    fn local_closure_named_args_use_parameter_names() {
+        let report = check(
+            "fun use() -> Int:\n    val f = (x: Int, y: Int) => x + y\n    f(x: 1, y: 2)\n.\n",
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[0] {
             typed::Item::Function(function) => assert_eq!(function.body.ty, Type::Int),
             other => panic!("expected function, got {other:?}"),
         }
