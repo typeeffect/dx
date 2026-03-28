@@ -121,14 +121,18 @@ fn runtime_call_args(symbol: &str, kind: &LowRuntimeCallKind) -> Vec<Operand> {
             _ => vec![Operand::ConstInt(i64::from(*arg_count))],
         },
         LowRuntimeCallKind::ClosureCreate {
-            capture_count: _,
+            captures: _,
             arity,
         } => vec![
             Operand::Register("%closure_env".into(), Type::Ptr),
             Operand::ConstInt(*arity as i64),
         ],
-        LowRuntimeCallKind::ClosureInvoke { arg_count, thunk } => {
-            let mut out = vec![Operand::Register("%closure".into(), Type::Ptr)];
+        LowRuntimeCallKind::ClosureInvoke {
+            closure,
+            arg_count,
+            thunk,
+        } => {
+            let mut out = vec![lower_value(closure)];
             if !thunk {
                 out.push(Operand::ConstInt(i64::from(*arg_count)));
             }
@@ -141,10 +145,14 @@ fn runtime_call_comment(kind: &LowRuntimeCallKind) -> String {
     match kind {
         LowRuntimeCallKind::PyCall { arg_count } => format!("py-call args={arg_count}"),
         LowRuntimeCallKind::ClosureCreate {
-            capture_count,
+            captures,
             arity,
-        } => format!("closure-create captures={capture_count} arity={arity}"),
-        LowRuntimeCallKind::ClosureInvoke { arg_count, thunk } => {
+        } => format!("closure-create captures={} arity={arity}", captures.len()),
+        LowRuntimeCallKind::ClosureInvoke {
+            arg_count,
+            thunk,
+            ..
+        } => {
             if *thunk {
                 "thunk-call".to_string()
             } else {

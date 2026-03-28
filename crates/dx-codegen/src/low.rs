@@ -82,10 +82,11 @@ pub enum LowRuntimeCallKind {
         arg_count: u32,
     },
     ClosureCreate {
-        capture_count: usize,
+        captures: Vec<LowValue>,
         arity: usize,
     },
     ClosureInvoke {
+        closure: Box<LowValue>,
         arg_count: u32,
         thunk: bool,
     },

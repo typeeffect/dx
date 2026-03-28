@@ -90,7 +90,7 @@ fn lower_function(
                     continue;
                 }
                 for op in ops {
-                    steps.push(lower_runtime_op(op));
+                    steps.push(lower_runtime_op(op, &function.locals));
                 }
                 if let Some(sites) = throw_by_pos.get(&(name.clone(), *bb, *stmt)) {
                     for site in sites {
@@ -118,7 +118,7 @@ fn lower_function(
     }
 }
 
-fn lower_runtime_op(op: &RuntimeOp) -> LowStep {
+fn lower_runtime_op(op: &RuntimeOp, locals: &[mir::Local]) -> LowStep {
     LowStep::RuntimeCall {
         statement: op.statement,
         destination: op.destination,
@@ -132,14 +132,27 @@ fn lower_runtime_op(op: &RuntimeOp) -> LowStep {
                 captures,
                 param_types,
             } => LowRuntimeCallKind::ClosureCreate {
-                capture_count: captures.len(),
+                captures: captures
+                    .iter()
+                    .map(|capture| {
+                        LowValue::Local(
+                            capture.source,
+                            low_type_from_dx(&locals[capture.source].ty),
+                        )
+                    })
+                    .collect(),
                 arity: param_types.len(),
             },
             RuntimeOpKind::ClosureInvoke {
+                closure_local,
                 arg_count,
                 thunk,
                 ..
             } => LowRuntimeCallKind::ClosureInvoke {
+                closure: Box::new(LowValue::Local(
+                    *closure_local,
+                    low_type_from_dx(&locals[*closure_local].ty),
+                )),
                 arg_count: *arg_count,
                 thunk: *thunk,
             },
@@ -297,13 +310,13 @@ mod tests {
 
         assert!(steps.iter().any(|step| matches!(
             step,
-            LowStep::RuntimeCall { symbol, kind: LowRuntimeCallKind::ClosureCreate { capture_count: 1, arity: 0 }, .. }
-            if *symbol == "dx_rt_closure_create"
+            LowStep::RuntimeCall { symbol, kind: LowRuntimeCallKind::ClosureCreate { captures, arity: 0 }, .. }
+            if *symbol == "dx_rt_closure_create" && captures.len() == 1
         )));
         assert!(steps.iter().any(|step| matches!(
             step,
-            LowStep::RuntimeCall { symbol, kind: LowRuntimeCallKind::ClosureInvoke { thunk: true, .. }, .. }
-            if symbol.starts_with("dx_rt_thunk_call")
+            LowStep::RuntimeCall { symbol, kind: LowRuntimeCallKind::ClosureInvoke { thunk: true, closure, .. }, .. }
+            if symbol.starts_with("dx_rt_thunk_call") && matches!(closure.as_ref(), LowValue::Local(_, LowType::Ptr))
         )));
     }
 

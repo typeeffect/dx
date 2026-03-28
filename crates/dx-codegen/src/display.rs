@@ -138,16 +138,30 @@ fn render_low_step(step: &LowStep, out: &mut String) {
                     write!(out, " (args={arg_count})").unwrap();
                 }
                 LowRuntimeCallKind::ClosureCreate {
-                    capture_count,
+                    captures,
                     arity,
                 } => {
-                    write!(out, " (captures={capture_count}, arity={arity})").unwrap();
+                    let rendered = captures
+                        .iter()
+                        .map(render_low_value)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(out, " (captures=[{rendered}], arity={arity})").unwrap();
                 }
-                LowRuntimeCallKind::ClosureInvoke { arg_count, thunk } => {
+                LowRuntimeCallKind::ClosureInvoke {
+                    closure,
+                    arg_count,
+                    thunk,
+                } => {
                     if *thunk {
-                        write!(out, " thunk()").unwrap();
+                        write!(out, " thunk({})", render_low_value(closure)).unwrap();
                     } else {
-                        write!(out, " (args={arg_count})").unwrap();
+                        write!(
+                            out,
+                            " ({}, args={arg_count})",
+                            render_low_value(closure)
+                        )
+                        .unwrap();
                     }
                 }
             }
@@ -257,14 +271,14 @@ mod tests {
     fn snapshot_closure_create_step() {
         let out = render("fun f(x: Int) -> lazy Int:\n    lazy x\n.\n");
         assert!(out.contains("call dx_rt_closure_create"), "got:\n{out}");
-        assert!(out.contains("(captures=1, arity=0)"), "got:\n{out}");
+        assert!(out.contains("(captures=[_0: i64], arity=0)"), "got:\n{out}");
     }
 
     #[test]
     fn snapshot_thunk_invoke_step() {
         let out = render("fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n");
         assert!(out.contains("call dx_rt_thunk_call"), "got:\n{out}");
-        assert!(out.contains("thunk()"), "got:\n{out}");
+        assert!(out.contains("thunk(_"), "got:\n{out}");
     }
 
     // ── throw-check steps ────────────────────────────────────────
