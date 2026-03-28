@@ -25,7 +25,7 @@ No parallel experimental frontends should be introduced unless the current plan 
 
 ## Current Status
 
-The bootstrap compiler pipeline now exists end-to-end up to the pre-LLVM runtime layer.
+The bootstrap compiler pipeline now exists end-to-end through a real textual LLVM IR emitter subset.
 
 Current implemented path:
 
@@ -35,20 +35,24 @@ Current implemented path:
 4. HIR
 5. type/effect checked HIR
 6. MIR
-7. runtime boundary plans
-8. unified runtime ops plan
+7. runtime plans
+8. low-level codegen
+9. LLVM-like lowering
+10. real textual LLVM IR emission for a supported subset
 
 This means the project is no longer in "frontend bootstrap only" mode.
-The current implementation focus is backend preparation:
+It is now in backend execution mode.
 
-- runtime ABI
-- throw/error boundary modeling
-- closure environment/runtime shape
-- LLVM lowering
+The current implementation focus is:
+
+- expanding the real emitter where it is mechanically safe
+- strengthening backend invariants and validation
+- stabilizing runtime ABI assumptions
+- preparing the transition from textual LLVM IR to LLVM toolchain integration
 
 ## Compiler Pipeline
 
-The intended pipeline is:
+The intended pipeline is now:
 
 1. lexer
 2. parser
@@ -56,8 +60,11 @@ The intended pipeline is:
 4. HIR
 5. type/effect checked HIR
 6. MIR
-7. runtime boundary layer
-8. LLVM lowering
+7. runtime plans
+8. low-level codegen (`dx-codegen`)
+9. LLVM-like lowering (`dx-llvm`)
+10. real textual LLVM IR emission (`dx-llvm-ir`)
+11. LLVM toolchain integration
 
 ## Representation Roles
 
@@ -116,6 +123,50 @@ Purpose:
 - effect-relevant execution boundaries visible
 
 MIR should be the first representation that is truly codegen-oriented.
+
+### Runtime Plans
+
+Purpose:
+
+- make backend-relevant runtime actions explicit before low-level lowering
+- separate semantic analysis from ABI planning
+- keep Python, closure, and throw boundaries visible as first-class backend inputs
+
+Current runtime planning layers:
+
+- `RuntimeOpsPlan`
+- `RuntimeExternPlan`
+- `ThrowRuntimePlan`
+
+### Low-Level Codegen
+
+Purpose:
+
+- lower MIR to a compact backend-oriented representation
+- preserve runtime calls, closure operations, and control flow in a simpler form
+- avoid committing to LLVM surface details too early
+
+This stage lives in `dx-codegen`.
+
+### LLVM-Like Lowering
+
+Purpose:
+
+- make low-level operations explicit in a form close to LLVM IR
+- introduce backend validation before real IR emission
+- support globals, externs, branches, runtime calls, and closure env packing
+
+This stage lives in `dx-llvm`.
+
+### Real Textual LLVM IR
+
+Purpose:
+
+- emit actual LLVM IR text for the supported subset
+- make the gap to real LLVM toolchain usage explicit and measurable
+- avoid early dependency on unstable or premature bindings
+
+This stage lives in `dx-llvm-ir`.
 
 ## Milestones
 
@@ -258,6 +309,191 @@ Included:
 - propagation of `!py`
 - propagation of `!throw`
 - propagation of initial `!io` / `!wait` hooks where needed
+
+## Milestone 7: Runtime Plans
+
+Status:
+
+- complete in initial operational form
+
+Goal:
+
+- make backend-relevant runtime behavior explicit before low-level lowering
+
+Included:
+
+- `RuntimeOpsPlan`
+- `RuntimeExternPlan`
+- `ThrowRuntimePlan`
+- closure runtime planning
+- Python runtime planning
+
+Exit criteria:
+
+- backend no longer needs to infer runtime hooks ad hoc
+- runtime symbol usage is derived from plans, not scattered logic
+
+## Milestone 8: Low-Level Codegen
+
+Status:
+
+- complete in bootstrap form
+
+Goal:
+
+- lower MIR into a compact codegen-oriented representation
+
+Included:
+
+- runtime calls
+- plain assignments
+- binary ops
+- control-flow terminators
+- closure create / invoke
+
+Exit criteria:
+
+- `dx-codegen` can represent the full currently-supported backend subset
+
+## Milestone 9: LLVM-Like Lowering and Validation
+
+Status:
+
+- complete in strong bootstrap form
+
+Goal:
+
+- lower `dx-codegen` into a representation close enough to LLVM IR to validate backend invariants
+
+Included:
+
+- globals
+- externs
+- blocks and terminators
+- runtime calls
+- `PackEnv`
+- validator checks for:
+  - register definition/use
+  - register type coherence
+  - global existence and ptr typing
+  - binary-op typing
+  - `PackEnv -> dx_rt_closure_create` flow
+
+Exit criteria:
+
+- backend invariants are checked before real IR emission
+
+## Milestone 10: Real Textual LLVM IR Emitter
+
+Status:
+
+- in progress, but already supports a serious subset
+
+Goal:
+
+- emit actual LLVM IR text for the currently stable backend subset
+
+Currently supported:
+
+- arithmetic
+- string globals
+- `Unit -> ret void`
+- thunk runtime path
+- Python runtime calls:
+  - function
+  - method
+  - dynamic
+
+Current unsupported boundary:
+
+- `match`
+
+Exit criteria:
+
+- supported subset is emitted as real textual LLVM IR
+- unsupported features fail explicitly and deterministically
+
+## Backend Execution Plan
+
+The next backend phase is organized into three milestones.
+
+### Backend Milestone A: Complete the Real Emitter Safely
+
+Goal:
+
+- push `dx-llvm-ir` from a serious subset toward near-complete coverage of the current core without inventing new semantics
+
+Work:
+
+- close remaining real-emitter gaps where lowering is already mechanical
+- improve coverage for mixed closure/string/control-flow scenarios
+- decide where `match` should be lowered:
+  - before `dx-llvm-ir`
+  - or directly inside it
+
+Risks:
+
+- implementing unsupported control flow in the wrong layer
+- adding backend-only semantics instead of translating existing semantics
+
+Exit criteria:
+
+- `dx-llvm-ir` covers almost everything already supported by `dx-llvm`
+- unsupported cases are explicit and narrow
+
+### Backend Milestone B: Make the Output LLVM-Toolchain-Ready
+
+Goal:
+
+- move from "LLVM IR text we emit" to "LLVM IR that real LLVM tooling can consume"
+
+Recommended strategy:
+
+- first: emit real `.ll` robustly
+- then: validate it with LLVM tooling
+- only later: consider bindings
+
+Work:
+
+- tighten textual IR fidelity
+- prepare verification through `llvm-as` / `opt` or equivalent tools
+- avoid premature adoption of heavy LLVM bindings
+
+Risks:
+
+- introducing bindings before backend conventions are stable
+- coupling the project too early to LLVM API churn
+
+Exit criteria:
+
+- emitted `.ll` is suitable for real LLVM verification on the supported subset
+
+### Backend Milestone C: Execute Through a Real Runtime
+
+Goal:
+
+- move from "validated IR" to "compiled and runnable subset"
+
+Work:
+
+- implement native runtime hooks or stubs for:
+  - Python calls
+  - closure create
+  - thunk call
+  - throw checks
+- stabilize concrete ABI choices:
+  - closure env layout
+  - runtime handle types
+  - return and error conventions
+
+Risks:
+
+- growing the runtime too early
+- implementing hooks before ABI decisions are stable
+
+Exit criteria:
+
+- demo programs in the stable subset can be lowered and executed end to end
 
 Exit criteria:
 
