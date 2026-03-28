@@ -1,8 +1,18 @@
-use crate::llvm::{Block, ExternDecl, Function, Instruction, Module, Operand, Terminator, Type};
+use crate::llvm::{
+    Block, ExternDecl, Function, GlobalString, Instruction, Module, Operand, Terminator, Type,
+};
 use std::fmt::Write;
 
 pub fn render_module(module: &Module) -> String {
     let mut out = String::new();
+
+    for global in &module.globals {
+        writeln!(out, "{}", render_global(global)).unwrap();
+    }
+
+    if !module.globals.is_empty() && (!module.externs.is_empty() || !module.functions.is_empty()) {
+        writeln!(out).unwrap();
+    }
 
     for ext in &module.externs {
         writeln!(out, "{}", render_extern(ext)).unwrap();
@@ -20,6 +30,15 @@ pub fn render_module(module: &Module) -> String {
     }
 
     out
+}
+
+fn render_global(global: &GlobalString) -> String {
+    format!(
+        "@{} = private unnamed_addr constant [{} x i8] {}",
+        global.symbol,
+        global.value.len() + 1,
+        render_c_string(&global.value)
+    )
 }
 
 fn render_extern(ext: &ExternDecl) -> String {
@@ -97,8 +116,26 @@ fn render_instruction(instr: &Instruction) -> String {
 fn render_operand(op: &Operand) -> String {
     match op {
         Operand::Register(name, ty) => format!("{} {}", render_type(ty), name),
+        Operand::Global(name, ty) => format!("{} @{}", render_type(ty), name),
         Operand::ConstInt(v) => format!("i64 {v}"),
     }
+}
+
+fn render_c_string(value: &str) -> String {
+    let mut out = String::from("c\"");
+    for byte in value.bytes() {
+        match byte {
+            b'\\' => out.push_str("\\5C"),
+            b'"' => out.push_str("\\22"),
+            b'\n' => out.push_str("\\0A"),
+            b'\r' => out.push_str("\\0D"),
+            b'\t' => out.push_str("\\09"),
+            0x20..=0x7E => out.push(byte as char),
+            _ => out.push_str(&format!("\\{:02X}", byte)),
+        }
+    }
+    out.push_str("\\00\"");
+    out
 }
 
 fn render_type(ty: &Type) -> &'static str {
@@ -225,6 +262,13 @@ mod tests {
     fn snapshot_ptr_return_for_string() {
         let out = render("fun f(s: Str) -> Str:\n    s\n.\n");
         assert!(out.contains("define ptr @f(ptr %0)"), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_string_literal_global() {
+        let out = render("fun f() -> Str:\n    \"hello\"\n.\n");
+        assert!(out.contains("@.str0 = private unnamed_addr constant [6 x i8] c\"hello\\00\""), "got:\n{out}");
+        assert!(out.contains("ret ptr @.str0"), "got:\n{out}");
     }
 
     // ── runtime call instructions ────────────────────────────────

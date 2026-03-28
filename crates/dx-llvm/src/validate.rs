@@ -22,6 +22,17 @@ impl ValidationReport {
 pub fn validate_module(module: &Module) -> ValidationReport {
     let mut diagnostics = Vec::new();
 
+    let mut global_symbols = BTreeSet::new();
+    for global in &module.globals {
+        if !global_symbols.insert(global.symbol.clone()) {
+            diagnostics.push(ValidationDiagnostic {
+                function: None,
+                block: None,
+                message: format!("duplicate global symbol '{}'", global.symbol),
+            });
+        }
+    }
+
     let mut extern_symbols = BTreeSet::new();
     let mut extern_index = HashMap::new();
     for ext in &module.externs {
@@ -309,6 +320,7 @@ fn validate_terminator(
 fn operand_type(op: &Operand) -> Type {
     match op {
         Operand::Register(_, ty) => ty.clone(),
+        Operand::Global(_, ty) => ty.clone(),
         Operand::ConstInt(_) => Type::I64,
     }
 }
@@ -320,6 +332,7 @@ mod tests {
 
     fn valid_module() -> Module {
         Module {
+            globals: vec![],
             externs: vec![ExternDecl {
                 symbol: "dx_rt_py_call_function",
                 params: vec![Type::Ptr, Type::I64],
@@ -416,6 +429,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_register_definition() {
         let module = Module {
+            globals: vec![],
             externs: vec![ExternDecl {
                 symbol: "dx_rt_py_call_function",
                 params: vec![Type::Ptr, Type::I64],

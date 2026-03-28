@@ -8,13 +8,18 @@ use dx_llvm::{validate_module, ValidationReport};
 
 fn module_with(functions: Vec<Function>) -> Module {
     Module {
+        globals: vec![],
         externs: vec![],
         functions,
     }
 }
 
 fn module_with_externs(externs: Vec<ExternDecl>, functions: Vec<Function>) -> Module {
-    Module { externs, functions }
+    Module {
+        globals: vec![],
+        externs,
+        functions,
+    }
 }
 
 fn simple_fn(name: &str, blocks: Vec<Block>) -> Function {
@@ -243,6 +248,7 @@ fn rejects_duplicate_extern_and_duplicate_function_together() {
         ret: Type::Void,
     };
     let module = Module {
+        globals: vec![],
         externs: vec![ext.clone(), ext],
         functions: vec![
             simple_fn("f", vec![simple_block("bb0", Terminator::Ret(None))]),
@@ -664,4 +670,118 @@ fn multiple_closure_creates_render_deterministically() {
     assert_eq!(r1, r2, "multiple closure creates must render identically");
     let create_count = r1.matches("@dx_rt_closure_create").count();
     assert!(create_count >= 2, "expected >=2 closure creates, got {create_count}:\n{r1}");
+}
+
+// ── ret void for Unit functions ──────────────────────────────────
+
+#[test]
+fn unit_function_renders_ret_void() {
+    let (_, rendered, _) = pipeline("fun f():\n    42\n.\n");
+    assert!(rendered.contains("define void @f()"), "void signature:\n{rendered}");
+    assert!(rendered.contains("ret void"), "ret void:\n{rendered}");
+}
+
+#[test]
+fn unit_function_with_side_effect_renders_ret_void() {
+    let (_, rendered, _) = pipeline(
+        "from py builtins import print\n\nfun f() !py:\n    print(\"hello\")\n.\n",
+    );
+    assert!(rendered.contains("define void @f()"), "void signature:\n{rendered}");
+    assert!(rendered.contains("ret void"), "ret void:\n{rendered}");
+}
+
+#[test]
+fn mixed_module_unit_and_nonunit() {
+    let (_, rendered, _) = pipeline(
+        "fun g(x: Int) -> Int:\n    x\n.\n\nfun h():\n    42\n.\n",
+    );
+    assert!(rendered.contains("define i64 @g("), "g signature:\n{rendered}");
+    assert!(rendered.contains("define void @h()"), "h signature:\n{rendered}");
+    assert!(rendered.contains("ret void"), "ret void:\n{rendered}");
+}
+
+#[test]
+fn unit_function_with_python_and_closure() {
+    let (_, rendered, _) = pipeline(
+        "from py pandas import read_csv\n\nfun f(path: Str) !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n",
+    );
+    assert!(rendered.contains("define void @f("), "void signature:\n{rendered}");
+    assert!(rendered.contains("@dx_rt_py_call_function"), "py call:\n{rendered}");
+    assert!(rendered.contains("@dx_rt_closure_create"), "closure create:\n{rendered}");
+}
+
+// ── validator diagnostic snapshot tests ──────────────────────────
+
+#[test]
+fn validator_undefined_register_diagnostic_is_specific() {
+    let module = module_with(vec![Function {
+        name: "f".into(),
+        params: vec![],
+        ret: Type::I64,
+        blocks: vec![Block {
+            label: "bb0".into(),
+            instructions: vec![],
+            terminator: Terminator::Ret(Some(Operand::Register("%ghost".into(), Type::I64))),
+        }],
+    }]);
+    let report = validate_module(&module);
+    assert!(has_diag(&report, "undefined register"), "{:?}", report.diagnostics);
+    assert!(has_diag(&report, "%ghost"), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn validator_duplicate_register_diagnostic_is_specific() {
+    // Two instructions define the same register name
+    let module = module_with_externs(
+        vec![ExternDecl {
+            symbol: "ext",
+            params: vec![],
+            ret: Type::I64,
+        }],
+        vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::I64,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![
+                    Instruction::CallExtern {
+                        result: Some("%1".into()),
+                        symbol: "ext",
+                        ret: Type::I64,
+                        args: vec![],
+                        comment: None,
+                    },
+                    Instruction::CallExtern {
+                        result: Some("%1".into()),
+                        symbol: "ext",
+                        ret: Type::I64,
+                        args: vec![],
+                        comment: None,
+                    },
+                ],
+                terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+            }],
+        }],
+    );
+    let report = validate_module(&module);
+    assert!(has_diag(&report, "duplicate") || has_diag(&report, "redefined"),
+        "expected duplicate register diagnostic: {:?}", report.diagnostics);
+}
+
+#[test]
+fn validator_missing_return_diagnostic_mentions_type() {
+    let module = module_with(vec![Function {
+        name: "f".into(),
+        params: vec![],
+        ret: Type::I64,
+        blocks: vec![Block {
+            label: "bb0".into(),
+            instructions: vec![],
+            terminator: Terminator::Ret(None),
+        }],
+    }]);
+    let report = validate_module(&module);
+    assert!(has_diag(&report, "missing return value"), "{:?}", report.diagnostics);
+    assert!(has_diag(&report, "I64"), "{:?}", report.diagnostics);
 }

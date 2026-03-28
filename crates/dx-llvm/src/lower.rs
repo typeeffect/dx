@@ -1,9 +1,12 @@
 use crate::llvm::{
-    Block, ExternDecl, Function, Instruction, Module, Operand, Param, Terminator, Type,
+    Block, ExternDecl, Function, GlobalString, Instruction, Module, Operand, Param, Terminator,
+    Type,
 };
 use dx_codegen::{low, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowValue};
+use std::collections::BTreeMap;
 
 pub fn lower_module(low: &LowModule) -> Module {
+    let mut state = LoweringState::default();
     let externs = low
         .externs
         .iter()
@@ -17,46 +20,78 @@ pub fn lower_module(low: &LowModule) -> Module {
     let functions = low
         .functions
         .iter()
-        .map(|function| Function {
-            name: function.name.clone(),
-            params: function
-                .params
-                .iter()
-                .map(|param| Param {
-                    name: format!("%{}", param.local),
-                    ty: lower_type(&param.ty),
-                })
-                .collect(),
-            ret: lower_type(&function.ret),
-            blocks: function
-                .blocks
-                .iter()
-                .map(|block| Block {
-                    label: block.label.clone(),
-                    instructions: block
-                        .steps
-                        .iter()
-                        .flat_map(lower_instructions)
-                        .collect(),
-                    terminator: lower_terminator(&block.terminator),
-                })
-                .collect(),
-        })
+        .map(|function| lower_function(function, &mut state))
         .collect();
 
-    Module { externs, functions }
+    Module {
+        globals: state.globals,
+        externs,
+        functions,
+    }
 }
 
-fn lower_terminator(term: &LowTerminator) -> Terminator {
+#[derive(Default)]
+struct LoweringState {
+    globals: Vec<GlobalString>,
+    string_pool: BTreeMap<String, String>,
+}
+
+impl LoweringState {
+    fn intern_string(&mut self, value: &str) -> String {
+        if let Some(symbol) = self.string_pool.get(value) {
+            return symbol.clone();
+        }
+
+        let symbol = format!(".str{}", self.globals.len());
+        self.globals.push(GlobalString {
+            symbol: symbol.clone(),
+            value: value.to_string(),
+        });
+        self.string_pool.insert(value.to_string(), symbol.clone());
+        symbol
+    }
+}
+
+fn lower_function(function: &low::LowFunction, state: &mut LoweringState) -> Function {
+    Function {
+        name: function.name.clone(),
+        params: function
+            .params
+            .iter()
+            .map(|param| Param {
+                name: format!("%{}", param.local),
+                ty: lower_type(&param.ty),
+            })
+            .collect(),
+        ret: lower_type(&function.ret),
+        blocks: function
+            .blocks
+            .iter()
+            .map(|block| Block {
+                label: block.label.clone(),
+                instructions: block
+                    .steps
+                    .iter()
+                    .flat_map(|step| lower_instructions(step, state))
+                    .collect(),
+                terminator: lower_terminator(&block.terminator, state),
+            })
+            .collect(),
+    }
+}
+
+fn lower_terminator(term: &LowTerminator, state: &mut LoweringState) -> Terminator {
     match term {
-        LowTerminator::Return(value) => Terminator::Ret(value.as_ref().map(lower_value)),
+        LowTerminator::Return(value) => {
+            Terminator::Ret(value.as_ref().map(|value| lower_value(value, state)))
+        }
         LowTerminator::Goto(target) => Terminator::Br(target.clone()),
         LowTerminator::SwitchBool {
             cond,
             then_label,
             else_label,
         } => Terminator::CondBr {
-            cond: lower_value(cond),
+            cond: lower_value(cond, state),
             then_label: then_label.clone(),
             else_label: else_label.clone(),
         },
@@ -65,7 +100,7 @@ fn lower_terminator(term: &LowTerminator) -> Terminator {
             arms,
             fallback,
         } => Terminator::MatchBr {
-            scrutinee: lower_value(scrutinee),
+            scrutinee: lower_value(scrutinee, state),
             arms: arms.clone(),
             fallback: fallback.clone(),
         },
@@ -73,7 +108,7 @@ fn lower_terminator(term: &LowTerminator) -> Terminator {
     }
 }
 
-fn lower_instructions(step: &LowStep) -> Vec<Instruction> {
+fn lower_instructions(step: &LowStep, state: &mut LoweringState) -> Vec<Instruction> {
     match step {
         LowStep::RuntimeCall {
             statement,
@@ -87,7 +122,10 @@ fn lower_instructions(step: &LowStep) -> Vec<Instruction> {
                 vec![
                     Instruction::PackEnv {
                         result: env.clone(),
-                        captures: captures.iter().map(lower_value).collect(),
+                        captures: captures
+                            .iter()
+                            .map(|capture| lower_value(capture, state))
+                            .collect(),
                     },
                     Instruction::CallExtern {
                         result: destination.map(|local| format!("%{}", local)),
@@ -102,7 +140,7 @@ fn lower_instructions(step: &LowStep) -> Vec<Instruction> {
                 result: destination.map(|local| format!("%{}", local)),
                 symbol,
                 ret: ret.as_ref().map(lower_type).unwrap_or(Type::Void),
-                args: runtime_call_args(symbol, kind),
+                args: runtime_call_args(symbol, kind, state),
                 comment: Some(format!("stmt={statement}, {}", runtime_call_comment(kind))),
             }],
         },
@@ -120,7 +158,11 @@ fn lower_instructions(step: &LowStep) -> Vec<Instruction> {
     }
 }
 
-fn runtime_call_args(symbol: &str, kind: &LowRuntimeCallKind) -> Vec<Operand> {
+fn runtime_call_args(
+    symbol: &str,
+    kind: &LowRuntimeCallKind,
+    state: &mut LoweringState,
+) -> Vec<Operand> {
     match kind {
         LowRuntimeCallKind::PyCall { arg_count } => match symbol {
             "dx_rt_py_call_function" => vec![
@@ -144,7 +186,7 @@ fn runtime_call_args(symbol: &str, kind: &LowRuntimeCallKind) -> Vec<Operand> {
             arg_count,
             thunk,
         } => {
-            let mut out = vec![lower_value(closure)];
+            let mut out = vec![lower_value(closure, state)];
             if !thunk {
                 out.push(Operand::ConstInt(i64::from(*arg_count)));
             }
@@ -184,11 +226,12 @@ fn lower_type(ty: &low::LowType) -> Type {
     }
 }
 
-fn lower_value(value: &LowValue) -> Operand {
+fn lower_value(value: &LowValue, state: &mut LoweringState) -> Operand {
     match value {
         LowValue::Local(local, ty) => Operand::Register(format!("%{}", local), lower_type(ty)),
         LowValue::ConstInt(v) => Operand::ConstInt(*v),
-        LowValue::ConstString(_) | LowValue::Unit => Operand::Register("%unit".into(), Type::Ptr),
+        LowValue::ConstString(value) => Operand::Global(state.intern_string(value), Type::Ptr),
+        LowValue::Unit => Operand::Register("%unit".into(), Type::Ptr),
     }
 }
 
@@ -260,6 +303,31 @@ mod tests {
         assert!(out.contains("define ptr @run"), "got:\n{out}");
         assert!(out.contains("call ptr @dx_rt_py_call_function"), "got:\n{out}");
         assert!(out.contains("call void @dx_rt_throw_check_pending()"), "got:\n{out}");
+    }
+
+    #[test]
+    fn lowers_string_literals_to_globals() {
+        let mir = typed_mir("fun f() -> Str:\n    \"hello\"\n.\n");
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+
+        assert_eq!(llvm.globals.len(), 1);
+        assert_eq!(llvm.globals[0].value, "hello");
+        let f = llvm.functions.iter().find(|f| f.name == "f").expect("f");
+        assert!(matches!(
+            f.blocks[0].terminator,
+            Terminator::Ret(Some(Operand::Global(_, Type::Ptr)))
+        ));
+    }
+
+    #[test]
+    fn deduplicates_identical_string_literals() {
+        let mir = typed_mir("fun a() -> Str:\n    \"hello\"\n.\n\nfun b() -> Str:\n    \"hello\"\n.\n");
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+
+        assert_eq!(llvm.globals.len(), 1);
+        assert_eq!(llvm.globals[0].value, "hello");
     }
 
     #[test]

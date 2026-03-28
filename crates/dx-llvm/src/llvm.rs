@@ -1,7 +1,14 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
+    pub globals: Vec<GlobalString>,
     pub externs: Vec<ExternDecl>,
     pub functions: Vec<Function>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalString {
+    pub symbol: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +74,7 @@ pub enum Terminator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operand {
     Register(String, Type),
+    Global(String, Type),
     ConstInt(i64),
 }
 
