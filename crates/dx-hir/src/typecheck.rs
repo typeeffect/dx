@@ -675,9 +675,13 @@ impl Checker {
                     if binding.callable.is_some() {
                         if self.globals.contains_key(name) {
                             typed::CallTarget::NativeFunction { name: name.clone() }
+                        } else if matches!(binding.ty, Type::PyObj) {
+                            typed::CallTarget::PythonDynamic
                         } else {
                             typed::CallTarget::LocalClosure { name: name.clone() }
                         }
+                    } else if matches!(binding.ty, Type::PyObj) {
+                        typed::CallTarget::PythonDynamic
                     } else {
                         typed::CallTarget::Dynamic
                     }
@@ -1174,6 +1178,23 @@ mod tests {
                             name: "f".to_string()
                         }
                     );
+                }
+                other => panic!("expected call result, got {other:?}"),
+            },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_local_pyobj_calls_as_python_dynamic() {
+        let report = check(
+            "from py pandas import read_csv\n\nfun invoke(path: Str) -> PyObj !py:\n    val f = read_csv(path)\n    f()\n.\n",
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[1] {
+            typed::Item::Function(function) => match function.body.result.as_ref().map(|e| &e.kind) {
+                Some(typed::ExprKind::Call { target, .. }) => {
+                    assert_eq!(target, &typed::CallTarget::PythonDynamic);
                 }
                 other => panic!("expected call result, got {other:?}"),
             },
