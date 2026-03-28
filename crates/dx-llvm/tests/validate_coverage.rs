@@ -862,6 +862,149 @@ fn string_global_with_ret_void() {
         "from py builtins import print\n\nfun f() !py:\n    print(\"hello\")\n.\n",
     );
     assert!(rendered.contains("ret void"), "ret void:\n{rendered}");
-    // String may or may not produce a global depending on lowering (it's a call arg)
-    // Just verify the module renders without panic
+}
+
+// ── string global rendering: c-string escape edge cases ─────────
+// These test render_c_string directly by constructing GlobalString modules.
+
+fn module_with_global(value: &str) -> dx_llvm::Module {
+    use dx_llvm::llvm::*;
+    Module {
+        globals: vec![GlobalString { symbol: ".str0".into(), value: value.into() }],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::Ptr,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![],
+                terminator: Terminator::Ret(Some(Operand::Global(".str0".into(), Type::Ptr))),
+            }],
+        }],
+    }
+}
+
+#[test]
+fn render_c_string_with_newline() {
+    let rendered = dx_llvm::render_module(&module_with_global("line1\nline2"));
+    assert!(rendered.contains("\\0A"), "newline escape:\n{rendered}");
+}
+
+#[test]
+fn render_c_string_with_quote() {
+    let rendered = dx_llvm::render_module(&module_with_global("say \"hi\""));
+    assert!(rendered.contains("\\22"), "quote escape:\n{rendered}");
+}
+
+#[test]
+fn render_c_string_with_backslash() {
+    let rendered = dx_llvm::render_module(&module_with_global("path\\to\\file"));
+    assert!(rendered.contains("\\5C"), "backslash escape:\n{rendered}");
+}
+
+#[test]
+fn render_c_string_with_tab() {
+    let rendered = dx_llvm::render_module(&module_with_global("col1\tcol2"));
+    assert!(rendered.contains("\\09"), "tab escape:\n{rendered}");
+}
+
+#[test]
+fn render_c_string_null_terminated() {
+    let rendered = dx_llvm::render_module(&module_with_global("hello"));
+    // Must end with \00"
+    assert!(rendered.contains("\\00\""), "null terminator:\n{rendered}");
+}
+
+#[test]
+fn render_c_string_length_includes_null() {
+    let rendered = dx_llvm::render_module(&module_with_global("abc"));
+    // "abc" is 3 chars + null = 4 bytes
+    assert!(rendered.contains("[4 x i8]"), "length includes null:\n{rendered}");
+}
+
+#[test]
+fn two_escaped_strings_stable_order() {
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![
+            GlobalString { symbol: ".str0".into(), value: "a\nb".into() },
+            GlobalString { symbol: ".str1".into(), value: "c\"d".into() },
+        ],
+        externs: vec![],
+        functions: vec![simple_fn("f", vec![simple_block("bb0", Terminator::Ret(None))])],
+    };
+    let r1 = dx_llvm::render_module(&module);
+    let r2 = dx_llvm::render_module(&module);
+    assert_eq!(r1, r2, "escaped strings must render deterministically");
+    assert!(r1.contains("\\0A"), "newline:\n{r1}");
+    assert!(r1.contains("\\22"), "quote:\n{r1}");
+}
+
+// ── validator: global operand blind spot documentation ───────────
+
+#[test]
+fn validator_rejects_unknown_global_operand() {
+    // Document: the validator currently DOES check for unknown globals
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::Ptr,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![],
+                terminator: Terminator::Ret(Some(Operand::Global(".missing".into(), Type::Ptr))),
+            }],
+        }],
+    };
+    let report = validate_module(&module);
+    assert!(has_diag(&report, "unknown global"), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn validator_accepts_declared_global_operand() {
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![GlobalString { symbol: ".str0".into(), value: "ok".into() }],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::Ptr,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![],
+                terminator: Terminator::Ret(Some(Operand::Global(".str0".into(), Type::Ptr))),
+            }],
+        }],
+    };
+    let report = validate_module(&module);
+    assert!(report.is_ok(), "declared global should be accepted: {:?}", report.diagnostics);
+}
+
+// ── mixed: string globals + assignments + runtime hooks ──────────
+
+#[test]
+fn mixed_string_global_and_binary_op() {
+    let (_, rendered, _) = pipeline(
+        "fun f(x: Int) -> Str:\n    val y = x + 1\n    \"result\"\n.\n",
+    );
+    assert!(rendered.contains("private unnamed_addr constant"), "global:\n{rendered}");
+    // Binary op should be visible somewhere (as an Assign instruction)
+    // The function should contain both the computation and the string return
+    assert!(rendered.contains("define ptr @f("), "function:\n{rendered}");
+}
+
+#[test]
+fn mixed_string_global_closure_thunk() {
+    let (_, rendered, _) = pipeline(
+        "fun f(x: Int) -> Str:\n    val t = lazy \"hello\"\n    t()\n.\n",
+    );
+    // Closure + thunk + potentially a string global
+    assert!(rendered.contains("@dx_rt_closure_create"), "create:\n{rendered}");
+    // Module renders without panic — the exact global behavior depends on lowering
 }
