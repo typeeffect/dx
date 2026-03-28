@@ -3,15 +3,6 @@
 ## These are expected to fail at parsing today.
 ## Sections are separated by "---" on its own line.
 
---- binary_operators
-fun fact(n: Int) -> Int:
-    if n <= 1:
-        1
-    else:
-        n * fact(n - 1)
-    .
-.
-
 --- generic_type_annotations
 fun ids(users: List[User]) -> List[Int]:
     users'map(_'id)
@@ -52,11 +43,6 @@ fun f(orders: Orders) -> Orders:
     .
 .
 
---- string_concatenation
-fun full_name() -> Str:
-    me'first + " " + me'last
-.
-
 --- query_syntax
 fun f(pg: Db) -> Q:
     query:
@@ -91,37 +77,5 @@ fun f(x: Bool) -> Unit:
         print("hi")
     else:
         ()
-    .
-.
-
---- arithmetic_in_if_condition
-## Binary operators in if conditions
-fun fact(n: Int) -> Int:
-    if n <= 1:
-        1
-    else:
-        n * fact(n - 1)
-    .
-.
-
---- operator_in_lambda_body
-## Operators inside lambda body
-fun f(xs: Xs) -> Xs:
-    xs'map(x => x + 1)
-.
-
---- nested_conditionals_with_operators
-## Example 21: nested conditionals need comparison operators
-fun classify(x: Int) -> Str:
-    if x < 0:
-        "neg"
-    elif x == 0:
-        "zero"
-    else:
-        if x < 10:
-            "small"
-        else:
-            "big"
-        .
     .
 .

@@ -159,6 +159,18 @@ should_parse_test!(fixture_match_with_member_access_scrutinee, "match_with_membe
 should_parse_test!(fixture_if_with_match_in_both_branches, "if_with_match_in_both_branches");
 should_parse_test!(fixture_lazy_param_alongside_normal, "lazy_param_alongside_normal_params");
 
+// operator expressions (newly parseable)
+should_parse_test!(fixture_binary_operators, "binary_operators");
+should_parse_test!(fixture_string_concatenation, "string_concatenation");
+should_parse_test!(fixture_arithmetic_in_if_condition, "arithmetic_in_if_condition");
+should_parse_test!(fixture_operator_in_lambda_body, "operator_in_lambda_body");
+should_parse_test!(fixture_nested_conditionals_with_operators, "nested_conditionals_with_operators");
+should_parse_test!(fixture_placeholder_with_operators, "placeholder_with_operators");
+should_parse_test!(fixture_comparison_on_member_access, "comparison_on_member_access");
+should_parse_test!(fixture_mixed_arithmetic_precedence, "mixed_arithmetic_precedence");
+should_parse_test!(fixture_equality_check, "equality_check");
+should_parse_test!(fixture_subtraction_in_recursive_call, "subtraction_in_recursive_call");
+
 // ── future-unsupported fixtures ──────────────────────────────────
 
 #[test]

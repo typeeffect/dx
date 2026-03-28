@@ -492,3 +492,83 @@ fun f(flag: Bool, x: T, y: T) -> Int:
 fun f(key: Str, compute: lazy Value !io, fallback: lazy Value) -> Value !io:
     compute()
 .
+
+## ── operator expressions (newly parseable) ───────────────────────
+
+--- binary_operators
+## Example 1: recursive function with arithmetic and comparison
+fun fact(n: Int) -> Int:
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+    .
+.
+
+--- string_concatenation
+## String concatenation with +
+fun full_name() -> Str:
+    me'first + " " + me'last
+.
+
+--- arithmetic_in_if_condition
+## Binary operators in if conditions
+fun fact2(n: Int) -> Int:
+    if n <= 1:
+        1
+    else:
+        n * fact2(n - 1)
+    .
+.
+
+--- operator_in_lambda_body
+## Operators inside lambda body
+fun f(xs: Xs) -> Xs:
+    xs'map(x => x + 1)
+.
+
+--- nested_conditionals_with_operators
+## Example 21: nested conditionals with comparison operators
+fun classify(x: Int) -> Str:
+    if x < 0:
+        "neg"
+    elif x == 0:
+        "zero"
+    else:
+        if x < 10:
+            "small"
+        else:
+            "big"
+        .
+    .
+.
+
+--- placeholder_with_operators
+## Placeholder-heavy with member access and operators
+fun f(orders: Orders) -> Orders:
+    orders'map(_'price * _'qty)
+.
+
+--- comparison_on_member_access
+## Comparisons applied to member-access chains
+fun younger(a: User, b: User) -> Bool:
+    a'age < b'age
+.
+
+--- mixed_arithmetic_precedence
+## Precedence: * binds tighter than +
+fun f(a: Int, b: Int, c: Int) -> Int:
+    a + b * c
+.
+
+--- equality_check
+## Equality in a condition
+fun is_zero(x: Int) -> Bool:
+    x == 0
+.
+
+--- subtraction_in_recursive_call
+## Subtraction in call argument
+fun f(n: Int) -> Int:
+    f(n - 1)
+.
