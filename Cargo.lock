@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "dx-codegen"
+version = "0.1.0"
+dependencies = [
+ "dx-hir",
+ "dx-mir",
+ "dx-parser",
+ "dx-runtime",
+]
+
+[[package]]
 name = "dx-hir"
 version = "0.1.0"
 dependencies = [
