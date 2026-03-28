@@ -450,11 +450,9 @@ fn accepts_mixed_python_and_specialized_closure_externs() {
     assert!(report.is_ok(), "mixed externs should validate: {:?}", report.diagnostics);
 }
 
-// ── integration: pipeline validates ──────────────────────────────
+// ── pipeline helper ──────────────────────────────────────────────
 
-#[test]
-fn pipeline_thunk_returning_int_validates() {
-    let src = "fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n";
+fn pipeline(src: &str) -> (dx_llvm::Module, String, dx_llvm::ValidationReport) {
     let tokens = dx_parser::Lexer::new(src).tokenize();
     let mut parser = dx_parser::Parser::new(tokens);
     let ast = parser.parse_module().expect("parse");
@@ -463,91 +461,139 @@ fn pipeline_thunk_returning_int_validates() {
     let mir = dx_mir::lower_module(&typed.module);
     let low = dx_codegen::lower_module(&mir);
     let llvm = dx_llvm::lower_module(&low);
-    let report = validate_module(&llvm);
-    assert!(report.is_ok(), "thunk Int pipeline: {:?}", report.diagnostics);
-
-    // Verify the specialized symbol is present
     let rendered = dx_llvm::render_module(&llvm);
+    let report = validate_module(&llvm);
+    (llvm, rendered, report)
+}
+
+// ── integration: pipeline validates ──────────────────────────────
+
+#[test]
+fn pipeline_straight_line_validates() {
+    let (_, _, report) = pipeline("fun f(x: Int) -> Int:\n    x + 1\n.\n");
+    assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
+}
+
+#[test]
+fn pipeline_thunk_returning_int_validates() {
+    let (_, rendered, report) = pipeline("fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n");
+    assert!(report.is_ok(), "thunk Int: {:?}", report.diagnostics);
     assert!(rendered.contains("thunk_call_i64") || rendered.contains("thunk_call"),
-        "specialized thunk symbol expected:\n{rendered}");
+        "specialized thunk symbol:\n{rendered}");
 }
 
 #[test]
 fn pipeline_thunk_returning_pyobj_validates() {
-    let src = "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n";
-    let tokens = dx_parser::Lexer::new(src).tokenize();
-    let mut parser = dx_parser::Parser::new(tokens);
-    let ast = parser.parse_module().expect("parse");
-    let hir = dx_hir::lower_module(&ast);
-    let typed = dx_hir::typecheck_module(&hir);
-    let mir = dx_mir::lower_module(&typed.module);
-    let low = dx_codegen::lower_module(&mir);
-    let llvm = dx_llvm::lower_module(&low);
-    let report = validate_module(&llvm);
-    assert!(report.is_ok(), "thunk PyObj pipeline: {:?}", report.diagnostics);
-
-    let rendered = dx_llvm::render_module(&llvm);
+    let (_, rendered, report) = pipeline(
+        "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n",
+    );
+    assert!(report.is_ok(), "thunk PyObj: {:?}", report.diagnostics);
     assert!(rendered.contains("thunk_call_ptr") || rendered.contains("thunk_call"),
-        "pointer-return thunk symbol expected:\n{rendered}");
+        "ptr-return thunk symbol:\n{rendered}");
 }
 
 #[test]
 fn pipeline_mixed_python_closure_validates() {
-    let src = "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n";
-    let tokens = dx_parser::Lexer::new(src).tokenize();
-    let mut parser = dx_parser::Parser::new(tokens);
-    let ast = parser.parse_module().expect("parse");
-    let hir = dx_hir::lower_module(&ast);
-    let typed = dx_hir::typecheck_module(&hir);
-    let mir = dx_mir::lower_module(&typed.module);
-    let low = dx_codegen::lower_module(&mir);
-    let llvm = dx_llvm::lower_module(&low);
-    let report = validate_module(&llvm);
-    assert!(report.is_ok(), "mixed pipeline: {:?}", report.diagnostics);
-
-    let rendered = dx_llvm::render_module(&llvm);
+    let (_, rendered, report) = pipeline(
+        "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n",
+    );
+    assert!(report.is_ok(), "mixed: {:?}", report.diagnostics);
     assert!(rendered.contains("@dx_rt_py_call_function"), "py call:\n{rendered}");
-    assert!(rendered.contains("@dx_rt_closure_create"), "closure create:\n{rendered}");
+    assert!(rendered.contains("@dx_rt_closure_create"), "create:\n{rendered}");
 }
 
 #[test]
-fn pipeline_specialized_externs_sorted_deterministically() {
+fn pipeline_deterministic() {
     let src = "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n";
-    let r1 = {
-        let tokens = dx_parser::Lexer::new(src).tokenize();
-        let mut parser = dx_parser::Parser::new(tokens);
-        let ast = parser.parse_module().expect("parse");
-        let hir = dx_hir::lower_module(&ast);
-        let typed = dx_hir::typecheck_module(&hir);
-        let mir = dx_mir::lower_module(&typed.module);
-        let low = dx_codegen::lower_module(&mir);
-        let llvm = dx_llvm::lower_module(&low);
-        dx_llvm::render_module(&llvm)
-    };
-    let r2 = {
-        let tokens = dx_parser::Lexer::new(src).tokenize();
-        let mut parser = dx_parser::Parser::new(tokens);
-        let ast = parser.parse_module().expect("parse");
-        let hir = dx_hir::lower_module(&ast);
-        let typed = dx_hir::typecheck_module(&hir);
-        let mir = dx_mir::lower_module(&typed.module);
-        let low = dx_codegen::lower_module(&mir);
-        let llvm = dx_llvm::lower_module(&low);
-        dx_llvm::render_module(&llvm)
-    };
-    assert_eq!(r1, r2, "rendering must be deterministic");
+    let (_, r1, _) = pipeline(src);
+    let (_, r2, _) = pipeline(src);
+    assert_eq!(r1, r2, "must be deterministic");
+}
+
+// ── operand fidelity: real locals in thunk/closure calls ─────────
+
+#[test]
+fn thunk_call_uses_real_closure_operand() {
+    // val t = lazy x; t() — the thunk call arg should be the real local for t (%N)
+    let (_, rendered, report) = pipeline("fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n");
+    assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
+    // Should contain a call with %N (real register), not a hardcoded %closure
+    assert!(!rendered.contains("%closure"), "should not use placeholder %closure:\n{rendered}");
+    // The thunk call instruction (not the declare) should use a real %N operand
+    let thunk_line = rendered.lines()
+        .find(|l| l.contains("thunk_call") && l.contains("call "))
+        .expect("thunk call instruction line");
+    assert!(thunk_line.contains("ptr %"), "thunk call should use real ptr operand:\n{thunk_line}");
 }
 
 #[test]
-fn pipeline_straight_line_validates() {
-    let tokens = dx_parser::Lexer::new("fun f(x: Int) -> Int:\n    x + 1\n.\n").tokenize();
-    let mut parser = dx_parser::Parser::new(tokens);
-    let ast = parser.parse_module().expect("parse");
-    let hir = dx_hir::lower_module(&ast);
-    let typed = dx_hir::typecheck_module(&hir);
-    let mir = dx_mir::lower_module(&typed.module);
-    let low = dx_codegen::lower_module(&mir);
-    let llvm = dx_llvm::lower_module(&low);
-    let report = validate_module(&llvm);
+fn closure_call_uses_real_closure_operand() {
+    // val f = (y: Int) => x + y; f(1) — closure call arg should be real local
+    let (_, rendered, report) = pipeline(
+        "fun g(x: Int) -> Int:\n    val f = (y: Int) => x + y\n    f(1)\n.\n",
+    );
     assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
+    assert!(!rendered.contains("%closure"), "should not use placeholder %closure:\n{rendered}");
+    let closure_call_line = rendered.lines()
+        .find(|l| l.contains("closure_call") && l.contains("call "));
+    if let Some(line) = closure_call_line {
+        assert!(line.contains("ptr %"), "closure call should use real ptr operand:\n{line}");
+    }
+}
+
+// ── mixed module: python + create + specialized thunk + throw ────
+
+#[test]
+fn mixed_full_scenario_renders_completely() {
+    let (_, rendered, report) = pipeline(
+        "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py !throw:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n",
+    );
+    assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
+
+    // All expected symbols present
+    assert!(rendered.contains("@dx_rt_py_call_function"), "py call:\n{rendered}");
+    assert!(rendered.contains("@dx_rt_closure_create"), "create:\n{rendered}");
+    assert!(rendered.contains("@dx_rt_throw_check_pending"), "throw-check:\n{rendered}");
+    // Thunk call with specialized or generic symbol
+    assert!(
+        rendered.contains("thunk_call_ptr") || rendered.contains("thunk_call"),
+        "thunk call:\n{rendered}"
+    );
+
+    // Throw check follows py call
+    let py_pos = rendered.find("@dx_rt_py_call_function").unwrap();
+    let throw_pos = rendered.find("@dx_rt_throw_check_pending").unwrap();
+    assert!(throw_pos > py_pos, "throw-check should follow py call");
+}
+
+// ── validator: closure operand type mismatch ─────────────────────
+
+#[test]
+fn rejects_closure_operand_type_mismatch_in_call() {
+    // Extern expects (ptr) but call passes (i64) — type mismatch
+    let module = module_with_externs(
+        vec![ExternDecl {
+            symbol: "dx_rt_thunk_call_i64",
+            params: vec![Type::Ptr],
+            ret: Type::I64,
+        }],
+        vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::I64,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![Instruction::CallExtern {
+                    result: Some("%1".into()),
+                    symbol: "dx_rt_thunk_call_i64",
+                    ret: Type::I64,
+                    args: vec![Operand::ConstInt(42)], // i64, but extern wants ptr
+                    comment: None,
+                }],
+                terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+            }],
+        }],
+    );
+    let report = validate_module(&module);
+    assert!(has_diag(&report, "arg type mismatch"), "{:?}", report.diagnostics);
 }
