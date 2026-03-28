@@ -278,10 +278,13 @@ impl Checker {
                     })
                     .collect();
 
-                let ret = self.infer_call_type(function_name, callee, &callee_typed.ty, &typed_args, scope);
+                let target = self.classify_call_target(callee, scope);
+                let ret =
+                    self.infer_call_type(function_name, callee, &callee_typed.ty, &typed_args, scope);
                 typed::Expr {
                     ty: ret,
                     kind: typed::ExprKind::Call {
+                        target,
                         callee: callee_typed,
                         args: typed_args,
                     },
@@ -517,6 +520,30 @@ impl Checker {
             message,
         });
     }
+
+    fn classify_call_target(&self, callee_hir: &hir::Expr, scope: &Scope) -> typed::CallTarget {
+        match callee_hir {
+            hir::Expr::Name(name) if self.imported_py.contains(name) => {
+                typed::CallTarget::PythonFunction { name: name.clone() }
+            }
+            hir::Expr::Name(name) => {
+                if let Some(binding) = scope.lookup(name) {
+                    if binding.callable.is_some() {
+                        if self.globals.contains_key(name) {
+                            typed::CallTarget::NativeFunction { name: name.clone() }
+                        } else {
+                            typed::CallTarget::LocalClosure { name: name.clone() }
+                        }
+                    } else {
+                        typed::CallTarget::Dynamic
+                    }
+                } else {
+                    typed::CallTarget::Dynamic
+                }
+            }
+            _ => typed::CallTarget::Dynamic,
+        }
+    }
 }
 
 fn collect_globals(module: &hir::Module) -> HashMap<String, Binding> {
@@ -722,6 +749,72 @@ mod tests {
                     other => panic!("expected function type, got {other:?}"),
                 },
                 other => panic!("expected let, got {other:?}"),
+            },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_python_function_calls() {
+        let report = check(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n",
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[1] {
+            typed::Item::Function(function) => match function.body.result.as_ref().map(|e| &e.kind) {
+                Some(typed::ExprKind::Call { target, .. }) => {
+                    assert_eq!(
+                        target,
+                        &typed::CallTarget::PythonFunction {
+                            name: "read_csv".to_string()
+                        }
+                    );
+                }
+                other => panic!("expected call result, got {other:?}"),
+            },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_native_function_calls() {
+        let report = check(
+            "fun inner() -> Int:\n    1\n.\n\nfun outer() -> Int:\n    inner()\n.\n",
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[1] {
+            typed::Item::Function(function) => match function.body.result.as_ref().map(|e| &e.kind) {
+                Some(typed::ExprKind::Call { target, .. }) => {
+                    assert_eq!(
+                        target,
+                        &typed::CallTarget::NativeFunction {
+                            name: "inner".to_string()
+                        }
+                    );
+                }
+                other => panic!("expected call result, got {other:?}"),
+            },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_local_closure_calls() {
+        let report = check(
+            "fun outer() -> Int:\n    val f = lazy 1\n    f()\n.\n",
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[0] {
+            typed::Item::Function(function) => match function.body.result.as_ref().map(|e| &e.kind) {
+                Some(typed::ExprKind::Call { target, .. }) => {
+                    assert_eq!(
+                        target,
+                        &typed::CallTarget::LocalClosure {
+                            name: "f".to_string()
+                        }
+                    );
+                }
+                other => panic!("expected call result, got {other:?}"),
             },
             other => panic!("expected function, got {other:?}"),
         }

@@ -66,6 +66,7 @@ pub enum ExprKind {
         name: String,
     },
     Call {
+        target: CallTarget,
         callee: Box<Expr>,
         args: Vec<Arg>,
     },
@@ -86,6 +87,14 @@ pub enum ExprKind {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallTarget {
+    NativeFunction { name: String },
+    PythonFunction { name: String },
+    LocalClosure { name: String },
+    Dynamic,
 }
 
 #[derive(Debug, Clone, PartialEq)]
