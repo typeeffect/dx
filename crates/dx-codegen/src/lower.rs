@@ -183,6 +183,7 @@ fn lower_runtime_op(op: &RuntimeOp, locals: &[mir::Local]) -> LowStep {
             RuntimeOpKind::ClosureInvoke {
                 closure_local,
                 arg_count,
+                runtime_args,
                 thunk,
                 ..
             } => LowRuntimeCallKind::ClosureInvoke {
@@ -191,6 +192,18 @@ fn lower_runtime_op(op: &RuntimeOp, locals: &[mir::Local]) -> LowStep {
                     low_type_from_dx(&locals[*closure_local].ty),
                 )),
                 arg_count: *arg_count,
+                args: runtime_args
+                    .iter()
+                    .map(|arg| match arg {
+                        mir::CallArg::Positional(value) => {
+                            crate::low::LowCallArg::Positional(lower_operand(value, locals))
+                        }
+                        mir::CallArg::Named { name, value } => crate::low::LowCallArg::Named {
+                            name: name.clone(),
+                            value: lower_operand(value, locals),
+                        },
+                    })
+                    .collect(),
                 thunk: *thunk,
             },
         },
@@ -359,6 +372,25 @@ mod tests {
             step,
             LowStep::RuntimeCall { symbol, kind: LowRuntimeCallKind::ClosureInvoke { thunk: true, closure, .. }, .. }
             if symbol.starts_with("dx_rt_thunk_call") && matches!(closure.as_ref(), LowValue::Local(_, LowType::Ptr))
+        )));
+    }
+
+    #[test]
+    fn closure_call_preserves_lowered_call_args() {
+        let module = typed_mir(
+            "fun run(x: Int) -> Int:\n    val f = (y: Int) => x + y\n    f(1)\n.\n",
+        );
+        let low = lower_module(&module);
+        let run = low.functions.iter().find(|f| f.name == "run").expect("run");
+        let steps = &run.blocks[0].steps;
+
+        assert!(steps.iter().any(|step| matches!(
+            step,
+            LowStep::RuntimeCall {
+                symbol,
+                kind: LowRuntimeCallKind::ClosureInvoke { thunk: false, args, .. },
+                ..
+            } if symbol.starts_with("dx_rt_closure_call") && matches!(&args[..], [crate::low::LowCallArg::Positional(LowValue::ConstInt(1))])
         )));
     }
 

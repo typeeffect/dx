@@ -105,8 +105,15 @@ pub enum LowRuntimeCallKind {
     ClosureInvoke {
         closure: Box<LowValue>,
         arg_count: u32,
+        args: Vec<LowCallArg>,
         thunk: bool,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LowCallArg {
+    Positional(LowValue),
+    Named { name: String, value: LowValue },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

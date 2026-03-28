@@ -186,6 +186,7 @@ fn runtime_call_args(kind: &LowRuntimeCallKind, state: &mut LoweringState) -> Ve
             closure,
             arg_count,
             thunk,
+            ..
         } => {
             let mut out = vec![lower_value(closure, state)];
             if !thunk {

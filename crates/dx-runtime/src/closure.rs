@@ -59,6 +59,7 @@ pub struct LoweredClosureInvocation {
     pub target: typed::CallTarget,
     pub runtime_symbol: &'static str,
     pub arg_count: u32,
+    pub runtime_args: Vec<mir::CallArg>,
     pub result_type: Type,
     pub effects: Vec<String>,
 }
@@ -156,6 +157,7 @@ pub fn build_closure_runtime_plan(module: &mir::Module) -> ClosureRuntimePlan {
                             target: target.clone(),
                             runtime_symbol: hook.symbol(),
                             arg_count: args.len() as u32,
+                            runtime_args: args.clone(),
                             result_type: ty.clone(),
                             effects: effects.clone(),
                         });
@@ -303,6 +305,10 @@ mod tests {
         assert_eq!(plan.invocations.len(), 1);
         assert_eq!(plan.invocations[0].runtime_symbol, "dx_rt_closure_call_i64");
         assert_eq!(plan.invocations[0].arg_count, 1);
+        assert!(matches!(
+            &plan.invocations[0].runtime_args[..],
+            [mir::CallArg::Positional(mir::Operand::Const(mir::Constant::Int(v)))] if v == "1"
+        ));
     }
 
     #[test]

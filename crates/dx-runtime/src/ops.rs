@@ -39,6 +39,7 @@ pub enum RuntimeOpKind {
     ClosureInvoke {
         closure_local: mir::LocalId,
         arg_count: u32,
+        runtime_args: Vec<mir::CallArg>,
         thunk: bool,
     },
 }
@@ -150,6 +151,7 @@ fn lower_invocation(invocation: &LoweredClosureInvocation) -> RuntimeOp {
         kind: RuntimeOpKind::ClosureInvoke {
             closure_local: invocation.closure_local,
             arg_count: invocation.arg_count,
+            runtime_args: invocation.runtime_args.clone(),
             thunk: invocation.arg_count == 0,
         },
     }
@@ -311,6 +313,25 @@ mod tests {
             RuntimeOpKind::PyCall { runtime_args, .. }
             if matches!(runtime_args[0], mir::Operand::Copy(_))
                 && matches!(runtime_args[1], mir::Operand::Const(mir::Constant::String(_)))
+        ));
+    }
+
+    #[test]
+    fn closure_runtime_ops_preserve_call_args() {
+        let module = lower(
+            "fun run(x: Int) -> Int:\n    val f = (y: Int) => x + y\n    f(1)\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let op = plan
+            .ops
+            .iter()
+            .find(|op| matches!(op.kind, RuntimeOpKind::ClosureInvoke { thunk: false, .. }))
+            .expect("closure invoke op");
+
+        assert!(matches!(
+            &op.kind,
+            RuntimeOpKind::ClosureInvoke { runtime_args, .. }
+            if matches!(&runtime_args[..], [mir::CallArg::Positional(mir::Operand::Const(mir::Constant::Int(v)))] if v == "1")
         ));
     }
 }

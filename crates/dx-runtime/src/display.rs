@@ -342,12 +342,22 @@ fn render_runtime_op(op: &RuntimeOp) -> String {
         RuntimeOpKind::ClosureInvoke {
             closure_local,
             arg_count,
+            runtime_args,
             thunk,
         } => {
             if *thunk {
                 write!(out, " thunk(_{closure_local})").unwrap();
             } else {
-                write!(out, " closure(_{closure_local}, args={arg_count})").unwrap();
+                write!(out, " closure(_{closure_local}, args={arg_count}").unwrap();
+                if !runtime_args.is_empty() {
+                    let rendered = runtime_args
+                        .iter()
+                        .map(render_call_arg)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(out, ", call_args=[{rendered}]").unwrap();
+                }
+                write!(out, ")").unwrap();
             }
         }
     }
@@ -361,6 +371,24 @@ fn render_runtime_op(op: &RuntimeOp) -> String {
         }
     }
     out
+}
+
+fn render_call_arg(arg: &dx_mir::mir::CallArg) -> String {
+    match arg {
+        dx_mir::mir::CallArg::Positional(value) => render_mir_operand(value),
+        dx_mir::mir::CallArg::Named { name, value } => {
+            format!("{name}: {}", render_mir_operand(value))
+        }
+    }
+}
+
+fn render_mir_operand(op: &dx_mir::mir::Operand) -> String {
+    match op {
+        dx_mir::mir::Operand::Copy(local) => format!("_{}", local),
+        dx_mir::mir::Operand::Const(dx_mir::mir::Constant::Int(v)) => v.clone(),
+        dx_mir::mir::Operand::Const(dx_mir::mir::Constant::String(v)) => format!("{v:?}"),
+        dx_mir::mir::Operand::Const(dx_mir::mir::Constant::Unit) => "()".to_string(),
+    }
 }
 
 #[cfg(test)]

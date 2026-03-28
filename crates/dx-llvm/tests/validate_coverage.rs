@@ -1034,3 +1034,139 @@ fn validator_rejects_non_ptr_global_operand() {
         report.diagnostics
     );
 }
+
+// ── register type coherence ─────────────────────────────────────
+
+#[test]
+fn validator_rejects_assign_with_wrong_operand_type() {
+    // %0 is defined as Ptr (param), but used in Assign as I64
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![Param { name: "%0".into(), ty: Type::Ptr }],
+            ret: Type::I64,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![Instruction::Assign {
+                    result: "%1".into(),
+                    ty: Type::I64,
+                    value: Operand::Register("%0".into(), Type::I64), // wrong: %0 is Ptr
+                }],
+                terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+            }],
+        }],
+    };
+    let report = validate_module(&module);
+    assert!(
+        has_diag(&report, "used with type"),
+        "should reject wrong type annotation on register: {:?}", report.diagnostics
+    );
+}
+
+#[test]
+fn validator_rejects_binary_op_with_wrong_operand_type() {
+    // %0 is I64, but used as Ptr in BinaryOp
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![Param { name: "%0".into(), ty: Type::I64 }],
+            ret: Type::I64,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![Instruction::BinaryOp {
+                    result: "%1".into(),
+                    op: dx_parser::BinOp::Add,
+                    ty: Type::I64,
+                    lhs: Operand::Register("%0".into(), Type::Ptr), // wrong: %0 is I64
+                    rhs: Operand::ConstInt(1),
+                }],
+                terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+            }],
+        }],
+    };
+    let report = validate_module(&module);
+    assert!(
+        has_diag(&report, "used with type"),
+        "should reject wrong type on binary op operand: {:?}", report.diagnostics
+    );
+}
+
+#[test]
+fn validator_rejects_condbr_with_wrong_cond_type() {
+    // %0 is I64, but CondBr annotates it as I1
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![Param { name: "%0".into(), ty: Type::I64 }],
+            ret: Type::Void,
+            blocks: vec![
+                Block {
+                    label: "bb0".into(),
+                    instructions: vec![],
+                    terminator: Terminator::CondBr {
+                        cond: Operand::Register("%0".into(), Type::I1), // wrong: %0 is I64
+                        then_label: "bb1".into(),
+                        else_label: "bb1".into(),
+                    },
+                },
+                simple_block("bb1", Terminator::Ret(None)),
+            ],
+        }],
+    };
+    let report = validate_module(&module);
+    assert!(
+        has_diag(&report, "used with type") || has_diag(&report, "expects i1"),
+        "should reject wrong cond type annotation: {:?}", report.diagnostics
+    );
+}
+
+// ── PackEnv -> closure_create flow ──────────────────────────────
+
+#[test]
+fn validator_accepts_pack_env_into_closure_create() {
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![],
+        externs: vec![ExternDecl {
+            symbol: "dx_rt_closure_create",
+            params: vec![Type::Ptr, Type::I64],
+            ret: Type::Ptr,
+        }],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![Param { name: "%0".into(), ty: Type::I64 }],
+            ret: Type::Ptr,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![
+                    Instruction::PackEnv {
+                        result: "%env".into(),
+                        captures: vec![Operand::Register("%0".into(), Type::I64)],
+                    },
+                    Instruction::CallExtern {
+                        result: Some("%1".into()),
+                        symbol: "dx_rt_closure_create",
+                        ret: Type::Ptr,
+                        args: vec![
+                            Operand::Register("%env".into(), Type::Ptr),
+                            Operand::ConstInt(0),
+                        ],
+                        comment: None,
+                    },
+                ],
+                terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::Ptr))),
+            }],
+        }],
+    };
+    let report = validate_module(&module);
+    assert!(report.is_ok(), "pack_env->closure_create should validate: {:?}", report.diagnostics);
+}

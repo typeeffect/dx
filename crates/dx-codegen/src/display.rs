@@ -1,6 +1,6 @@
 use crate::low::{
-    LowAssignValue, LowFunction, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowType,
-    LowValue,
+    LowAssignValue, LowCallArg, LowFunction, LowModule, LowRuntimeCallKind, LowStep,
+    LowTerminator, LowType, LowValue,
 };
 use std::fmt::Write;
 
@@ -186,17 +186,22 @@ fn render_low_step(step: &LowStep, out: &mut String) {
                 LowRuntimeCallKind::ClosureInvoke {
                     closure,
                     arg_count,
+                    args,
                     thunk,
                 } => {
                     if *thunk {
                         write!(out, " thunk({})", render_low_value(closure)).unwrap();
                     } else {
-                        write!(
-                            out,
-                            " ({}, args={arg_count})",
-                            render_low_value(closure)
-                        )
-                        .unwrap();
+                        write!(out, " ({}, args={arg_count}", render_low_value(closure)).unwrap();
+                        if !args.is_empty() {
+                            let rendered = args
+                                .iter()
+                                .map(render_low_call_arg)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            write!(out, ", call_args=[{rendered}]").unwrap();
+                        }
+                        write!(out, ")").unwrap();
                     }
                 }
             }
@@ -217,6 +222,13 @@ fn render_low_step(step: &LowStep, out: &mut String) {
             )
             .unwrap();
         }
+    }
+}
+
+fn render_low_call_arg(arg: &LowCallArg) -> String {
+    match arg {
+        LowCallArg::Positional(value) => render_low_value(value),
+        LowCallArg::Named { name, value } => format!("{name}: {}", render_low_value(value)),
     }
 }
 
