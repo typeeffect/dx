@@ -258,3 +258,106 @@ fn emit_rejects_python_placeholder_operands() {
         "expected UnsupportedOperand(%%py_...), got: {:?}", err
     );
 }
+
+// ── Python calls with string globals as args ─────────────────────
+
+#[test]
+fn emit_python_function_call_has_name_global() {
+    let ir = emit(
+        "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n",
+    );
+    // Function name "read_csv" should be a global string
+    assert!(ir.contains("c\"read_csv\\00\""), "function name global:\n{ir}");
+    assert!(ir.contains("@dx_rt_py_call_function"), "py call:\n{ir}");
+}
+
+#[test]
+fn emit_python_method_call_has_method_name_global() {
+    let ir = emit(
+        "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)'head()\n.\n",
+    );
+    // Method name "head" should be a global string
+    assert!(ir.contains("c\"head\\00\""), "method name global:\n{ir}");
+    assert!(ir.contains("@dx_rt_py_call_method"), "method call:\n{ir}");
+}
+
+#[test]
+fn emit_python_call_globals_in_stable_order() {
+    let ir = emit(
+        "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)'head()\n.\n",
+    );
+    // Both "read_csv" and "head" globals should appear, in stable order
+    let r1 = emit(
+        "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)'head()\n.\n",
+    );
+    assert_eq!(ir, r1, "python call globals deterministic");
+    assert!(ir.contains("c\"read_csv\\00\""), "read_csv global:\n{ir}");
+    assert!(ir.contains("c\"head\\00\""), "head global:\n{ir}");
+}
+
+#[test]
+fn emit_string_return_plus_python_call_globals_coexist() {
+    let ir = emit(
+        "from py builtins import print\n\nfun f() -> Str !py:\n    print(\"msg\")\n    \"result\"\n.\n",
+    );
+    // Should have globals for both "print" (function name) and "result" (return value)
+    assert!(ir.contains("c\"print\\00\""), "print name global:\n{ir}");
+    assert!(ir.contains("c\"result\\00\""), "result string global:\n{ir}");
+    // Deterministic
+    let ir2 = emit(
+        "from py builtins import print\n\nfun f() -> Str !py:\n    print(\"msg\")\n    \"result\"\n.\n",
+    );
+    assert_eq!(ir, ir2, "mixed globals deterministic");
+}
+
+// ── empty string as call argument ────────────────────────────────
+
+#[test]
+fn emit_empty_string_global_as_call_arg() {
+    // Construct a module where an empty string global is used as a call arg
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![GlobalString { symbol: ".str0".into(), value: "".into() }],
+        externs: vec![ExternDecl {
+            symbol: "ext",
+            params: vec![Type::Ptr],
+            ret: Type::Void,
+        }],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::Void,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![Instruction::CallExtern {
+                    result: None,
+                    symbol: "ext",
+                    ret: Type::Void,
+                    args: vec![Operand::Global(".str0".into(), Type::Ptr)],
+                    comment: None,
+                }],
+                terminator: Terminator::Ret(None),
+            }],
+        }],
+    };
+    let ir = emit_module(&module).expect("emit");
+    assert!(ir.contains("[1 x i8] c\"\\00\""), "empty string global:\n{ir}");
+    assert!(ir.contains("getelementptr inbounds [1 x i8], ptr @.str0"), "gep for empty string:\n{ir}");
+    assert!(ir.contains("call void @ext("), "call with string arg:\n{ir}");
+}
+
+// ── match mixed: supported code fails only because of match ──────
+
+#[test]
+fn emit_match_fails_even_with_supported_arithmetic() {
+    // A function with both arithmetic (supported) and match (unsupported)
+    // should fail specifically because of match, not arithmetic
+    let module = llvm_module(
+        "fun f(x: Result) -> Int:\n    val y = 1 + 2\n    match x:\n        Ok(v):\n            v\n        _:\n            y\n    .\n.\n",
+    );
+    let err = emit_module(&module).expect_err("should fail on match");
+    assert!(
+        matches!(err, dx_llvm_ir::EmitError::UnsupportedTerminator("match")),
+        "error should be specifically about match: {:?}", err
+    );
+}
