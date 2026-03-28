@@ -361,3 +361,42 @@ fn emit_match_fails_even_with_supported_arithmetic() {
         "error should be specifically about match: {:?}", err
     );
 }
+
+// ── mixed closure + string scenarios ─────────────────────────────
+
+#[test]
+fn emit_thunk_capturing_string_literal() {
+    // The string is first materialized as a local, then captured by the thunk.
+    let ir = emit("fun f() -> Str:\n    val s = \"hello\"\n    val t = lazy s\n    t()\n.\n");
+    assert!(ir.contains("c\"hello\\00\""), "string global:\n{ir}");
+    assert!(ir.contains("@dx_rt_closure_create"), "closure create:\n{ir}");
+    assert!(ir.contains("thunk_call"), "thunk call:\n{ir}");
+}
+
+#[test]
+fn emit_string_return_plus_thunk() {
+    // Function returns string and also creates/invokes a thunk
+    let ir = emit("fun f(x: Int) -> Str:\n    val t = lazy x\n    t()\n    \"done\"\n.\n");
+    assert!(ir.contains("c\"done\\00\""), "return string global:\n{ir}");
+    assert!(ir.contains("@dx_rt_closure_create"), "closure create:\n{ir}");
+}
+
+#[test]
+fn emit_string_and_closure_deterministic() {
+    let src = "fun f() -> Str:\n    val s = \"hello\"\n    val t = lazy s\n    t()\n.\n";
+    let ir1 = emit(src);
+    let ir2 = emit(src);
+    assert_eq!(ir1, ir2, "string + closure emission deterministic");
+}
+
+#[test]
+fn emit_mixed_string_globals_and_env_coexist() {
+    // Both string globals (for return value and py call name) and closure env should coexist
+    let ir = emit(
+        "from py builtins import print\n\nfun f(x: Int) -> Str !py:\n    print(\"msg\")\n    val t = lazy x\n    t()\n    \"result\"\n.\n",
+    );
+    assert!(ir.contains("c\"print\\00\""), "print name:\n{ir}");
+    assert!(ir.contains("c\"result\\00\""), "result string:\n{ir}");
+    assert!(ir.contains("@dx_rt_closure_create"), "closure create:\n{ir}");
+    assert!(ir.contains("@dx_rt_py_call_function"), "py call:\n{ir}");
+}
