@@ -276,6 +276,17 @@ mod tests {
     }
 
     #[test]
+    fn lowers_unit_function_to_ret_void() {
+        let mir = typed_mir("fun f(x: Int) -> Unit:\n    x\n.\n");
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+        let f = llvm.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert_eq!(f.ret, Type::Void);
+        assert!(matches!(f.blocks[0].terminator, Terminator::Ret(None)));
+    }
+
+    #[test]
     fn lowers_if_to_cond_br() {
         let mir =
             typed_mir("fun f(x: Bool) -> Int:\n    if x:\n        1\n    else:\n        2\n    .\n.\n");

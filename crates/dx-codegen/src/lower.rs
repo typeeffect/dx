@@ -105,7 +105,7 @@ fn lower_function(
             LowBlock {
                 label: format!("bb{block_id}"),
                 steps,
-                terminator: lower_terminator(&block.terminator, &function.locals),
+                terminator: lower_terminator(&block.terminator, &function.locals, &ret),
             }
         })
         .collect();
@@ -192,11 +192,16 @@ fn low_type_from_dx(ty: &Type) -> LowType {
     }
 }
 
-fn lower_terminator(terminator: &mir::Terminator, locals: &[mir::Local]) -> LowTerminator {
+fn lower_terminator(
+    terminator: &mir::Terminator,
+    locals: &[mir::Local],
+    function_ret: &LowType,
+) -> LowTerminator {
     match terminator {
-        mir::Terminator::Return(value) => {
-            LowTerminator::Return(value.as_ref().map(|it| lower_operand(it, locals)))
-        }
+        mir::Terminator::Return(value) => match function_ret {
+            LowType::Void => LowTerminator::Return(None),
+            _ => LowTerminator::Return(value.as_ref().map(|it| lower_operand(it, locals))),
+        },
         mir::Terminator::Goto(target) => LowTerminator::Goto(format!("bb{target}")),
         mir::Terminator::SwitchBool {
             cond,
@@ -341,6 +346,16 @@ mod tests {
             f.blocks[0].terminator,
             LowTerminator::Return(Some(LowValue::Local(_, LowType::I64)))
         ));
+    }
+
+    #[test]
+    fn lowers_unit_function_return_to_void_return() {
+        let module = typed_mir("fun f(x: Int) -> Unit:\n    x\n.\n");
+        let low = lower_module(&module);
+        let f = low.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert_eq!(f.ret, LowType::Void);
+        assert!(matches!(f.blocks[0].terminator, LowTerminator::Return(None)));
     }
 
     #[test]
