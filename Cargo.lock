@@ -60,3 +60,7 @@ dependencies = [
  "dx-mir",
  "dx-parser",
 ]
+
+[[package]]
+name = "dx-runtime-stub"
+version = "0.1.0"
