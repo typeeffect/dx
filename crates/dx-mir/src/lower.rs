@@ -252,7 +252,11 @@ impl Lowerer {
                 );
                 current_bb
             }
-            typed::ExprKind::Closure { params, body } => {
+            typed::ExprKind::Closure {
+                params,
+                captures,
+                body,
+            } => {
                 let (return_type, effects) = match &expr.ty {
                     Type::Function { ret, effects, .. } => ((**ret).clone(), effects.clone()),
                     _ => match body.as_ref() {
@@ -265,6 +269,17 @@ impl Lowerer {
                     mir::Statement::Assign {
                         place: dest,
                         value: mir::Rvalue::Closure {
+                            captures: captures
+                                .iter()
+                                .filter_map(|capture| {
+                                    env.get(&capture.name).copied().map(|source| mir::ClosureCapture {
+                                        name: capture.name.clone(),
+                                        source,
+                                        ty: capture.ty.clone(),
+                                        mutable: capture.mutable,
+                                    })
+                                })
+                                .collect(),
                             param_types: params.iter().map(|p| p.ty.clone()).collect(),
                             return_type,
                             effects,
@@ -661,6 +676,29 @@ mod tests {
                     )
                 });
                 assert!(found, "expected closure with preserved py effect");
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preserves_closure_captures() {
+        let module = lower("fun make(x: Int) -> lazy Int:\n    lazy x\n.\n");
+        match &module.items[0] {
+            mir::Item::Function(function) => {
+                let found = function.blocks[0].statements.iter().any(|stmt| {
+                    matches!(
+                        stmt,
+                        mir::Statement::Assign {
+                            value: mir::Rvalue::Closure { captures, .. },
+                            ..
+                        } if captures.len() == 1
+                            && captures[0].name == "x"
+                            && captures[0].source == function.params[0]
+                            && captures[0].ty == Type::Int
+                    )
+                });
+                assert!(found, "expected closure with captured x");
             }
             other => panic!("expected function, got {other:?}"),
         }

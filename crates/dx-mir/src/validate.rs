@@ -89,7 +89,11 @@ fn validate_rvalue(
                 }
             }
         }
-        mir::Rvalue::Closure { .. } => {}
+        mir::Rvalue::Closure { captures, .. } => {
+            for capture in captures {
+                validate_local(function, block_id, capture.source, "closure capture source", diagnostics);
+            }
+        }
     }
 }
 

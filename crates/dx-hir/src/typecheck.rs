@@ -22,7 +22,7 @@ pub fn typecheck_module(module: &hir::Module) -> TypeCheckReport {
         imported_py,
         diagnostics: Vec::new(),
     };
-    let module = checker.typecheck_module(module);
+    let module = crate::capture::annotate_module_captures(checker.typecheck_module(module));
     TypeCheckReport {
         module,
         diagnostics: checker.diagnostics,
@@ -344,6 +344,7 @@ impl Checker {
                     ty,
                     kind: typed::ExprKind::Closure {
                         params: typed_params,
+                        captures: vec![],
                         body: typed_body,
                     },
                 }
@@ -777,7 +778,7 @@ fn callable_from_param(param: &typed::Param) -> Option<CallableSig> {
 
 fn callable_from_typed_expr(expr: &typed::Expr) -> Option<CallableSig> {
     match &expr.kind {
-        typed::ExprKind::Closure { params, body } => {
+        typed::ExprKind::Closure { params, body, .. } => {
             let ret = match body.as_ref() {
                 typed::ClosureBody::Expr(expr) => expr.ty.clone(),
                 typed::ClosureBody::Block(block) => block.ty.clone(),

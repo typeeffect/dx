@@ -1,3 +1,4 @@
+pub mod capture;
 pub mod effects;
 pub mod hir;
 pub mod lower;
@@ -6,6 +7,7 @@ pub mod typecheck;
 pub mod typed;
 pub mod types;
 
+pub use capture::annotate_module_captures;
 pub use effects::{check_module_effects, Diagnostic, FunctionEffectReport, ModuleEffectReport};
 pub use hir::*;
 pub use lower::lower_module;

@@ -97,10 +97,19 @@ pub enum Rvalue {
         effects: Vec<String>,
     },
     Closure {
+        captures: Vec<ClosureCapture>,
         param_types: Vec<Type>,
         return_type: Type,
         effects: Vec<String>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClosureCapture {
+    pub name: String,
+    pub source: LocalId,
+    pub ty: Type,
+    pub mutable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -73,6 +73,7 @@ pub enum ExprKind {
     },
     Closure {
         params: Vec<ClosureParam>,
+        captures: Vec<ClosureCapture>,
         body: Box<ClosureBody>,
     },
     If {
@@ -104,6 +105,13 @@ pub enum CallTarget {
 pub struct ClosureParam {
     pub name: String,
     pub ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClosureCapture {
+    pub name: String,
+    pub ty: Type,
+    pub mutable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
