@@ -1,6 +1,7 @@
 use crate::abi::{AbiType, PyRuntimePlan};
 use crate::closure::{ClosureAbiType, ClosureRuntimePlan};
 use crate::lower::{LoweredPyCall, PyDispatchTarget};
+use crate::ops::{RuntimeOp, RuntimeOpKind, RuntimeOpsPlan};
 use crate::py::PyCallKind;
 use dx_mir::display::render_type;
 use std::fmt::Write;
@@ -164,6 +165,30 @@ pub fn render_combined_plan(
     out
 }
 
+pub fn render_runtime_ops_plan(plan: &RuntimeOpsPlan) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== Runtime Ops Plan ===").unwrap();
+    writeln!(out).unwrap();
+
+    if !plan.required_hooks.is_empty() {
+        writeln!(out, "required hooks:").unwrap();
+        for hook in &plan.required_hooks {
+            writeln!(out, "  {}", hook.symbol()).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    if !plan.ops.is_empty() {
+        writeln!(out, "ops:").unwrap();
+        for op in &plan.ops {
+            writeln!(out, "  {}", render_runtime_op(op)).unwrap();
+        }
+    }
+
+    out
+}
+
 fn render_closure_abi_type(ty: ClosureAbiType) -> &'static str {
     match ty {
         ClosureAbiType::ClosureHandle => "ClosureHandle",
@@ -180,11 +205,67 @@ fn render_abi_type(ty: AbiType) -> &'static str {
     }
 }
 
+fn render_runtime_op(op: &RuntimeOp) -> String {
+    let mut out = String::new();
+    write!(out, "{}/bb{}[{}]", op.function, op.block, op.statement).unwrap();
+    if let Some(dest) = op.destination {
+        write!(out, " -> _{dest}").unwrap();
+    }
+    write!(out, "  {}", op.runtime_symbol).unwrap();
+
+    match &op.kind {
+        RuntimeOpKind::PyCall { dispatch, arg_count } => {
+            write!(out, " {}", render_dispatch(dispatch)).unwrap();
+            write!(out, "(args={arg_count})").unwrap();
+        }
+        RuntimeOpKind::ClosureCreate {
+            captures,
+            param_types,
+        } => {
+            let params: Vec<String> = param_types.iter().map(render_type).collect();
+            write!(out, " closure({})", params.join(", ")).unwrap();
+            if !captures.is_empty() {
+                write!(out, " captures [").unwrap();
+                for (i, cap) in captures.iter().enumerate() {
+                    if i > 0 {
+                        write!(out, ", ").unwrap();
+                    }
+                    write!(out, "{}: {} <= _{}", cap.name, render_type(&cap.ty), cap.source)
+                        .unwrap();
+                }
+                write!(out, "]").unwrap();
+            }
+        }
+        RuntimeOpKind::ClosureInvoke {
+            closure_local,
+            arg_count,
+            thunk,
+        } => {
+            if *thunk {
+                write!(out, " thunk(_{closure_local})").unwrap();
+            } else {
+                write!(out, " closure(_{closure_local}, args={arg_count})").unwrap();
+            }
+        }
+    }
+
+    if let Some(result_type) = &op.result_type {
+        write!(out, " -> {}", render_type(result_type)).unwrap();
+    }
+    if !op.effects.is_empty() {
+        for effect in &op.effects {
+            write!(out, " !{effect}").unwrap();
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::abi::{build_python_runtime_plan, RuntimeHook};
     use crate::lower::lower_python_runtime_calls;
+    use crate::ops::build_runtime_ops_plan;
     use dx_hir::{lower_module as lower_hir, typecheck_module};
     use dx_mir::{lower_module as lower_mir, mir};
     use dx_parser::{Lexer, Parser};
@@ -448,5 +529,31 @@ mod tests {
         assert!(out.contains("dx_rt_thunk_call"), "got:\n{out}");
         assert!(out.contains("!py"), "got:\n{out}");
         assert!(out.contains("captures [path: Str <="), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_runtime_ops_plan_combines_python_and_closure_ops() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py:\n    val thunk = lazy read_csv(path)\n    thunk()\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let out = render_runtime_ops_plan(&plan);
+
+        assert!(out.contains("=== Runtime Ops Plan ==="), "got:\n{out}");
+        assert!(out.contains("dx_rt_closure_create"), "got:\n{out}");
+        assert!(out.contains("dx_rt_thunk_call"), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_runtime_ops_plan_includes_python_dispatch() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let out = render_runtime_ops_plan(&plan);
+
+        assert!(out.contains("dx_rt_py_call_function"), "got:\n{out}");
+        assert!(out.contains("pandas.read_csv(args=1)"), "got:\n{out}");
+        assert!(out.contains("-> PyObj !py"), "got:\n{out}");
     }
 }
