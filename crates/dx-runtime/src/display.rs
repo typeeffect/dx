@@ -4,6 +4,7 @@ use crate::externs::{RuntimeExternAbiType, RuntimeExternPlan};
 use crate::lower::{LoweredPyCall, PyDispatchTarget};
 use crate::ops::{RuntimeOp, RuntimeOpKind, RuntimeOpsPlan};
 use crate::py::PyCallKind;
+use crate::throw::{ThrowBoundaryKind, ThrowRuntimePlan};
 use dx_mir::display::render_type;
 use std::fmt::Write;
 
@@ -227,6 +228,57 @@ fn render_extern_abi_type(ty: &RuntimeExternAbiType) -> &'static str {
         RuntimeExternAbiType::ClosureHandle => "ClosureHandle",
         RuntimeExternAbiType::EnvHandle => "EnvHandle",
         RuntimeExternAbiType::U32 => "U32",
+    }
+}
+
+pub fn render_throw_plan(plan: &ThrowRuntimePlan) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== Throw Runtime Plan ===").unwrap();
+    writeln!(out).unwrap();
+
+    if !plan.required_hooks.is_empty() {
+        writeln!(out, "required hooks:").unwrap();
+        for hook in &plan.required_hooks {
+            writeln!(out, "  {}", hook.symbol()).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    if plan.sites.is_empty() {
+        writeln!(out, "(no throw sites)").unwrap();
+    } else {
+        writeln!(out, "throw sites:").unwrap();
+        for site in &plan.sites {
+            write!(
+                out,
+                "  {}/bb{}[{}]  {} [{}]",
+                site.function,
+                site.block,
+                site.statement,
+                site.source_runtime_symbol,
+                render_throw_boundary(&site.boundary),
+            )
+            .unwrap();
+            if !site.effects.is_empty() {
+                for effect in &site.effects {
+                    write!(out, " !{effect}").unwrap();
+                }
+            }
+            writeln!(out).unwrap();
+        }
+    }
+
+    out
+}
+
+fn render_throw_boundary(kind: &ThrowBoundaryKind) -> &'static str {
+    match kind {
+        ThrowBoundaryKind::PythonFunction => "py-function",
+        ThrowBoundaryKind::PythonMethod => "py-method",
+        ThrowBoundaryKind::PythonDynamic => "py-dynamic",
+        ThrowBoundaryKind::ClosureCall => "closure-call",
+        ThrowBoundaryKind::ThunkCall => "thunk-call",
     }
 }
 
@@ -810,7 +862,6 @@ mod tests {
 
     #[test]
     fn extern_plan_with_py_throw_effects() {
-        // Module with !py !throw effects — externs should still be present
         let module = lower(
             "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py !throw:\n    read_csv(path)\n.\n",
         );
@@ -819,7 +870,110 @@ mod tests {
         let out = render_runtime_extern_plan(&plan);
 
         assert!(out.contains("extern dx_rt_py_call_function"), "got:\n{out}");
-        // Effects don't change the extern signature
         assert!(out.contains("(Utf8Ptr, U32) -> PyObjHandle"), "got:\n{out}");
+    }
+
+    // ── ThrowRuntimePlan rendering ───────────────────────────────
+
+    #[test]
+    fn throw_plan_python_function_call() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py !throw:\n    read_csv(path)\n.\n",
+        );
+        let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
+        let out = render_throw_plan(&plan);
+
+        assert!(out.contains("=== Throw Runtime Plan ==="), "got:\n{out}");
+        assert!(out.contains("dx_rt_throw_check_pending"), "got:\n{out}");
+        assert!(out.contains("dx_rt_py_call_function"), "got:\n{out}");
+        assert!(out.contains("[py-function]"), "got:\n{out}");
+        assert!(out.contains("!py"), "got:\n{out}");
+    }
+
+    #[test]
+    fn throw_plan_python_method_call() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py !throw:\n    read_csv(path)'head()\n.\n",
+        );
+        let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
+        let out = render_throw_plan(&plan);
+
+        assert!(out.contains("[py-method]"), "got:\n{out}");
+        assert!(out.contains("dx_rt_py_call_method"), "got:\n{out}");
+    }
+
+    #[test]
+    fn throw_plan_python_dynamic_call() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun invoke(path: Str) -> PyObj !py !throw:\n    val f = read_csv(path)\n    f()\n.\n",
+        );
+        let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
+        let out = render_throw_plan(&plan);
+
+        // Should have py-function + py-dynamic
+        assert!(out.contains("[py-function]"), "got:\n{out}");
+        assert!(out.contains("[py-dynamic]"), "got:\n{out}");
+    }
+
+    #[test]
+    fn throw_plan_thunk_invocation() {
+        let module = lower(
+            "fun run(thunk: lazy PyObj !py !throw) -> PyObj !py !throw:\n    thunk()\n.\n",
+        );
+        let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
+        let out = render_throw_plan(&plan);
+
+        assert!(out.contains("[thunk-call]"), "got:\n{out}");
+        assert!(out.contains("dx_rt_thunk_call"), "got:\n{out}");
+    }
+
+    #[test]
+    fn throw_plan_closure_call() {
+        let module = lower(
+            "fun run(f: (PyObj) -> PyObj !py !throw, df: PyObj) -> PyObj !py !throw:\n    f(df)\n.\n",
+        );
+        let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
+        let out = render_throw_plan(&plan);
+
+        assert!(out.contains("[closure-call]"), "got:\n{out}");
+        assert!(out.contains("dx_rt_closure_call"), "got:\n{out}");
+    }
+
+    #[test]
+    fn throw_plan_closure_creation_is_not_throw_site() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py !throw:\n    lazy read_csv(path)\n.\n",
+        );
+        let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
+        let out = render_throw_plan(&plan);
+
+        assert!(out.contains("(no throw sites)"), "got:\n{out}");
+        assert!(plan.required_hooks.is_empty());
+    }
+
+    #[test]
+    fn throw_plan_mixed_python_and_closure() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py !throw:\n    val df = read_csv(path)\n    val thunk = lazy df\n    thunk()\n.\n",
+        );
+        let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
+        let out = render_throw_plan(&plan);
+
+        // Python call is a throw site
+        assert!(out.contains("[py-function]"), "got:\n{out}");
+        // Thunk invocation: only if it carries !throw effect
+        assert!(out.contains("throw sites:"), "got:\n{out}");
+        assert!(out.contains("dx_rt_throw_check_pending"), "got:\n{out}");
+    }
+
+    #[test]
+    fn throw_plan_empty_module() {
+        let module = lower("fun f() -> Int:\n    1\n.\n");
+        let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
+        let out = render_throw_plan(&plan);
+
+        assert!(out.contains("(no throw sites)"), "got:\n{out}");
+        assert!(plan.required_hooks.is_empty());
+        assert!(plan.sites.is_empty());
     }
 }

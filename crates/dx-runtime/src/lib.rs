@@ -18,7 +18,7 @@ pub use closure::{
 };
 pub use display::{
     render_closure_plan, render_combined_plan, render_lowered_calls, render_runtime_extern_plan,
-    render_runtime_ops_plan, render_runtime_plan,
+    render_runtime_ops_plan, render_runtime_plan, render_throw_plan,
 };
 pub use externs::{
     build_runtime_extern_plan, build_runtime_extern_plan_from_module, RuntimeExtern,
