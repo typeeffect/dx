@@ -1,4 +1,5 @@
 use crate::llvm::{Function, Instruction, Module, Operand, Terminator, Type};
+use dx_parser::BinOp;
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,11 +138,12 @@ fn validate_function(
                         });
                     }
                 }
-                Instruction::BinaryOp { lhs, rhs, .. } => {
+                Instruction::BinaryOp { op, ty, lhs, rhs, .. } => {
                     validate_operand_defined(lhs, &defined_registers, function, block, diagnostics);
                     validate_operand_defined(rhs, &defined_registers, function, block, diagnostics);
                     validate_operand_global(lhs, global_symbols, function, block, diagnostics);
                     validate_operand_global(rhs, global_symbols, function, block, diagnostics);
+                    validate_binary_op(op, ty, lhs, rhs, function, block, diagnostics);
                 }
                 Instruction::PackEnv { result: _, captures } => {
                     for capture in captures {
@@ -241,6 +243,88 @@ fn validate_function(
             global_symbols,
             diagnostics,
         );
+    }
+}
+
+fn validate_binary_op(
+    op: &BinOp,
+    result_ty: &Type,
+    lhs: &Operand,
+    rhs: &Operand,
+    function: &Function,
+    block: &crate::llvm::Block,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let lhs_ty = operand_type(lhs);
+    let rhs_ty = operand_type(rhs);
+
+    if lhs_ty != rhs_ty {
+        diagnostics.push(ValidationDiagnostic {
+            function: Some(function.name.clone()),
+            block: Some(block.label.clone()),
+            message: format!(
+                "binary op operand mismatch: lhs is {:?}, rhs is {:?}",
+                lhs_ty, rhs_ty
+            ),
+        });
+        return;
+    }
+
+    match op {
+        BinOp::Add | BinOp::Sub | BinOp::Mul => {
+            if *result_ty != lhs_ty {
+                diagnostics.push(ValidationDiagnostic {
+                    function: Some(function.name.clone()),
+                    block: Some(block.label.clone()),
+                    message: format!(
+                        "arithmetic result type mismatch: op result is {:?}, operands are {:?}",
+                        result_ty, lhs_ty
+                    ),
+                });
+            }
+            if !matches!(lhs_ty, Type::I64 | Type::Double) {
+                diagnostics.push(ValidationDiagnostic {
+                    function: Some(function.name.clone()),
+                    block: Some(block.label.clone()),
+                    message: format!("arithmetic op requires numeric operands, got {:?}", lhs_ty),
+                });
+            }
+        }
+        BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq => {
+            if *result_ty != Type::I1 {
+                diagnostics.push(ValidationDiagnostic {
+                    function: Some(function.name.clone()),
+                    block: Some(block.label.clone()),
+                    message: format!(
+                        "comparison result type must be I1, got {:?}",
+                        result_ty
+                    ),
+                });
+            }
+            if !matches!(lhs_ty, Type::I64 | Type::Double) {
+                diagnostics.push(ValidationDiagnostic {
+                    function: Some(function.name.clone()),
+                    block: Some(block.label.clone()),
+                    message: format!("ordered comparison requires numeric operands, got {:?}", lhs_ty),
+                });
+            }
+        }
+        BinOp::EqEq => {
+            if *result_ty != Type::I1 {
+                diagnostics.push(ValidationDiagnostic {
+                    function: Some(function.name.clone()),
+                    block: Some(block.label.clone()),
+                    message: format!("equality result type must be I1, got {:?}", result_ty),
+                });
+            }
+            if matches!(lhs_ty, Type::Void) {
+                diagnostics.push(ValidationDiagnostic {
+                    function: Some(function.name.clone()),
+                    block: Some(block.label.clone()),
+                    message: "equality does not support void operands".to_string(),
+                });
+            }
+        }
     }
 }
 
@@ -616,5 +700,118 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("unknown label")));
+    }
+
+    #[test]
+    fn rejects_binary_op_operand_type_mismatch() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::I64,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![Instruction::BinaryOp {
+                        result: "%1".into(),
+                        op: BinOp::Add,
+                        ty: Type::I64,
+                        lhs: Operand::ConstInt(1),
+                        rhs: Operand::Register("%g".into(), Type::Ptr),
+                    }],
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("binary op operand mismatch")));
+    }
+
+    #[test]
+    fn rejects_arithmetic_result_type_mismatch() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::I1,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![Instruction::BinaryOp {
+                        result: "%1".into(),
+                        op: BinOp::Add,
+                        ty: Type::I1,
+                        lhs: Operand::ConstInt(1),
+                        rhs: Operand::ConstInt(2),
+                    }],
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I1))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("arithmetic result type mismatch")));
+    }
+
+    #[test]
+    fn rejects_comparison_with_non_boolean_result() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::I64,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![Instruction::BinaryOp {
+                        result: "%1".into(),
+                        op: BinOp::Lt,
+                        ty: Type::I64,
+                        lhs: Operand::ConstInt(1),
+                        rhs: Operand::ConstInt(2),
+                    }],
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("comparison result type must be I1")));
+    }
+
+    #[test]
+    fn accepts_well_typed_comparison() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::I1,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![Instruction::BinaryOp {
+                        result: "%1".into(),
+                        op: BinOp::LtEq,
+                        ty: Type::I1,
+                        lhs: Operand::ConstInt(1),
+                        rhs: Operand::ConstInt(2),
+                    }],
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I1))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
     }
 }
