@@ -1,4 +1,5 @@
 use crate::emit::{emit_module, EmitError};
+use crate::toolchain::{LlvmToolchain, ToolchainError};
 use dx_codegen::lower_module as lower_low;
 use dx_hir::{lower_module as lower_hir, typecheck_module};
 use dx_llvm::{lower_module as lower_llvm_like, validate_module, ValidationDiagnostic};
@@ -13,6 +14,7 @@ pub enum PipelineError {
     Parse(String),
     Validation(Vec<ValidationDiagnostic>),
     Emit(EmitError),
+    Toolchain(ToolchainError),
 }
 
 impl std::fmt::Display for PipelineError {
@@ -38,6 +40,7 @@ impl std::fmt::Display for PipelineError {
                 Ok(())
             }
             PipelineError::Emit(err) => write!(f, "emit error: {err:?}"),
+            PipelineError::Toolchain(err) => write!(f, "toolchain error: {err}"),
         }
     }
 }
@@ -53,6 +56,12 @@ impl From<std::io::Error> for PipelineError {
 impl From<EmitError> for PipelineError {
     fn from(value: EmitError) -> Self {
         Self::Emit(value)
+    }
+}
+
+impl From<ToolchainError> for PipelineError {
+    fn from(value: ToolchainError) -> Self {
+        Self::Toolchain(value)
     }
 }
 
@@ -85,11 +94,53 @@ pub fn emit_file_to_path(input: &Path, output: &Path) -> Result<(), PipelineErro
     Ok(())
 }
 
+pub fn verify_ll_path(path: &Path) -> Result<(), PipelineError> {
+    let toolchain = LlvmToolchain::discover().ok_or(ToolchainError::MissingTool("llvm-as"))?;
+    verify_ll_path_with_toolchain(path, &toolchain)
+}
+
+pub fn emit_file_to_path_and_verify(input: &Path, output: &Path) -> Result<(), PipelineError> {
+    emit_file_to_path(input, output)?;
+    verify_ll_path(output)
+}
+
+pub fn verify_ll_path_with_toolchain(
+    path: &Path,
+    toolchain: &LlvmToolchain,
+) -> Result<(), PipelineError> {
+    toolchain.verify_ll_file(path)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::toolchain::LlvmToolchain;
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("dx-llvm-ir-{nonce}"));
+        fs::create_dir_all(&dir).expect("mkdir");
+        dir
+    }
+
+    #[cfg(unix)]
+    fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write script");
+        let mut perms = fs::metadata(&path).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).expect("chmod");
+        path
+    }
 
     #[test]
     fn emits_plain_arithmetic_source() {
@@ -112,12 +163,7 @@ mod tests {
 
     #[test]
     fn writes_ir_to_output_path() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let base = std::env::temp_dir().join(format!("dx-llvm-ir-{nonce}"));
-        fs::create_dir_all(&base).expect("mkdir");
+        let base = temp_dir();
         let input = base.join("input.dx");
         let output = base.join("output.ll");
         fs::write(&input, "fun f() -> Int:\n    1\n.\n").expect("write input");
@@ -130,5 +176,40 @@ mod tests {
         let _ = fs::remove_file(&input);
         let _ = fs::remove_file(&output);
         let _ = fs::remove_dir(&base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn verifies_emitted_output_with_given_toolchain() {
+        let base = temp_dir();
+        let input = base.join("input.dx");
+        let output = base.join("output.ll");
+        let log = base.join("log.txt");
+        fs::write(&input, "fun f() -> Int:\n    1\n.\n").expect("write input");
+
+        let llvm_as = write_script(
+            &base,
+            "llvm-as",
+            &format!("echo llvm-as >> {}\nexit 0", log.display()),
+        );
+        let opt = write_script(
+            &base,
+            "opt",
+            &format!("echo opt >> {}\nexit 0", log.display()),
+        );
+        let toolchain = LlvmToolchain {
+            llvm_as,
+            opt: Some(opt),
+            llc: None,
+        };
+
+        emit_file_to_path(&input, &output).expect("emit file");
+        verify_ll_path_with_toolchain(&output, &toolchain).expect("verify");
+
+        let contents = fs::read_to_string(&log).expect("read log");
+        assert!(contents.contains("llvm-as"), "got:\n{contents}");
+        assert!(contents.contains("opt"), "got:\n{contents}");
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
