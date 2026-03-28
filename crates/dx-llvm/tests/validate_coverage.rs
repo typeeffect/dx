@@ -362,7 +362,181 @@ fn only_invalid_function_produces_diagnostics() {
     assert!(!report.diagnostics.is_empty());
 }
 
+// ── specialized closure hook: extern/call return type mismatch ───
+
+#[test]
+fn rejects_call_return_type_mismatch_i64_vs_ptr() {
+    // Extern declares i64 return, call says ptr
+    let module = module_with_externs(
+        vec![ExternDecl {
+            symbol: "dx_rt_thunk_call_i64",
+            params: vec![Type::Ptr],
+            ret: Type::I64,
+        }],
+        vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::Ptr,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![Instruction::CallExtern {
+                    result: Some("%1".into()),
+                    symbol: "dx_rt_thunk_call_i64",
+                    ret: Type::Ptr, // mismatch: extern says i64
+                    args: vec![Operand::Register("%0".into(), Type::Ptr)],
+                    comment: None,
+                }],
+                terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::Ptr))),
+            }],
+        }],
+    );
+    let report = validate_module(&module);
+    assert!(has_diag(&report, "call return type mismatch"), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn accepts_matching_specialized_thunk_call() {
+    // Extern and call both agree on i64 return
+    let module = module_with_externs(
+        vec![ExternDecl {
+            symbol: "dx_rt_thunk_call_i64",
+            params: vec![Type::Ptr],
+            ret: Type::I64,
+        }],
+        vec![Function {
+            name: "f".into(),
+            params: vec![Param { name: "%0".into(), ty: Type::Ptr }],
+            ret: Type::I64,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![Instruction::CallExtern {
+                    result: Some("%1".into()),
+                    symbol: "dx_rt_thunk_call_i64",
+                    ret: Type::I64,
+                    args: vec![Operand::Register("%0".into(), Type::Ptr)],
+                    comment: None,
+                }],
+                terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+            }],
+        }],
+    );
+    let report = validate_module(&module);
+    assert!(report.is_ok(), "should be valid: {:?}", report.diagnostics);
+}
+
+#[test]
+fn accepts_mixed_python_and_specialized_closure_externs() {
+    let module = module_with_externs(
+        vec![
+            ExternDecl {
+                symbol: "dx_rt_closure_create",
+                params: vec![Type::Ptr, Type::I64],
+                ret: Type::Ptr,
+            },
+            ExternDecl {
+                symbol: "dx_rt_py_call_function",
+                params: vec![Type::Ptr, Type::I64],
+                ret: Type::Ptr,
+            },
+            ExternDecl {
+                symbol: "dx_rt_thunk_call_ptr",
+                params: vec![Type::Ptr],
+                ret: Type::Ptr,
+            },
+        ],
+        vec![simple_fn("f", vec![simple_block("bb0", Terminator::Ret(None))])],
+    );
+    let report = validate_module(&module);
+    assert!(report.is_ok(), "mixed externs should validate: {:?}", report.diagnostics);
+}
+
 // ── integration: pipeline validates ──────────────────────────────
+
+#[test]
+fn pipeline_thunk_returning_int_validates() {
+    let src = "fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n";
+    let tokens = dx_parser::Lexer::new(src).tokenize();
+    let mut parser = dx_parser::Parser::new(tokens);
+    let ast = parser.parse_module().expect("parse");
+    let hir = dx_hir::lower_module(&ast);
+    let typed = dx_hir::typecheck_module(&hir);
+    let mir = dx_mir::lower_module(&typed.module);
+    let low = dx_codegen::lower_module(&mir);
+    let llvm = dx_llvm::lower_module(&low);
+    let report = validate_module(&llvm);
+    assert!(report.is_ok(), "thunk Int pipeline: {:?}", report.diagnostics);
+
+    // Verify the specialized symbol is present
+    let rendered = dx_llvm::render_module(&llvm);
+    assert!(rendered.contains("thunk_call_i64") || rendered.contains("thunk_call"),
+        "specialized thunk symbol expected:\n{rendered}");
+}
+
+#[test]
+fn pipeline_thunk_returning_pyobj_validates() {
+    let src = "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n";
+    let tokens = dx_parser::Lexer::new(src).tokenize();
+    let mut parser = dx_parser::Parser::new(tokens);
+    let ast = parser.parse_module().expect("parse");
+    let hir = dx_hir::lower_module(&ast);
+    let typed = dx_hir::typecheck_module(&hir);
+    let mir = dx_mir::lower_module(&typed.module);
+    let low = dx_codegen::lower_module(&mir);
+    let llvm = dx_llvm::lower_module(&low);
+    let report = validate_module(&llvm);
+    assert!(report.is_ok(), "thunk PyObj pipeline: {:?}", report.diagnostics);
+
+    let rendered = dx_llvm::render_module(&llvm);
+    assert!(rendered.contains("thunk_call_ptr") || rendered.contains("thunk_call"),
+        "pointer-return thunk symbol expected:\n{rendered}");
+}
+
+#[test]
+fn pipeline_mixed_python_closure_validates() {
+    let src = "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n";
+    let tokens = dx_parser::Lexer::new(src).tokenize();
+    let mut parser = dx_parser::Parser::new(tokens);
+    let ast = parser.parse_module().expect("parse");
+    let hir = dx_hir::lower_module(&ast);
+    let typed = dx_hir::typecheck_module(&hir);
+    let mir = dx_mir::lower_module(&typed.module);
+    let low = dx_codegen::lower_module(&mir);
+    let llvm = dx_llvm::lower_module(&low);
+    let report = validate_module(&llvm);
+    assert!(report.is_ok(), "mixed pipeline: {:?}", report.diagnostics);
+
+    let rendered = dx_llvm::render_module(&llvm);
+    assert!(rendered.contains("@dx_rt_py_call_function"), "py call:\n{rendered}");
+    assert!(rendered.contains("@dx_rt_closure_create"), "closure create:\n{rendered}");
+}
+
+#[test]
+fn pipeline_specialized_externs_sorted_deterministically() {
+    let src = "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n";
+    let r1 = {
+        let tokens = dx_parser::Lexer::new(src).tokenize();
+        let mut parser = dx_parser::Parser::new(tokens);
+        let ast = parser.parse_module().expect("parse");
+        let hir = dx_hir::lower_module(&ast);
+        let typed = dx_hir::typecheck_module(&hir);
+        let mir = dx_mir::lower_module(&typed.module);
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = dx_llvm::lower_module(&low);
+        dx_llvm::render_module(&llvm)
+    };
+    let r2 = {
+        let tokens = dx_parser::Lexer::new(src).tokenize();
+        let mut parser = dx_parser::Parser::new(tokens);
+        let ast = parser.parse_module().expect("parse");
+        let hir = dx_hir::lower_module(&ast);
+        let typed = dx_hir::typecheck_module(&hir);
+        let mir = dx_mir::lower_module(&typed.module);
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = dx_llvm::lower_module(&low);
+        dx_llvm::render_module(&llvm)
+    };
+    assert_eq!(r1, r2, "rendering must be deterministic");
+}
 
 #[test]
 fn pipeline_straight_line_validates() {
