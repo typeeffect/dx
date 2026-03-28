@@ -55,7 +55,7 @@ pub fn validate_module(module: &Module) -> ValidationReport {
                 message: format!("duplicate function '{}'", function.name),
             });
         }
-        validate_function(function, &extern_index, &mut diagnostics);
+        validate_function(function, &global_symbols, &extern_index, &mut diagnostics);
     }
 
     ValidationReport { diagnostics }
@@ -63,6 +63,7 @@ pub fn validate_module(module: &Module) -> ValidationReport {
 
 fn validate_function(
     function: &Function,
+    global_symbols: &BTreeSet<String>,
     extern_index: &HashMap<&'static str, &crate::llvm::ExternDecl>,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
@@ -123,6 +124,7 @@ fn validate_function(
             match instr {
                 Instruction::Assign { ty, value, .. } => {
                     validate_operand_defined(value, &defined_registers, function, block, diagnostics);
+                    validate_operand_global(value, global_symbols, function, block, diagnostics);
                     if operand_type(value) != *ty {
                         diagnostics.push(ValidationDiagnostic {
                             function: Some(function.name.clone()),
@@ -138,12 +140,21 @@ fn validate_function(
                 Instruction::BinaryOp { lhs, rhs, .. } => {
                     validate_operand_defined(lhs, &defined_registers, function, block, diagnostics);
                     validate_operand_defined(rhs, &defined_registers, function, block, diagnostics);
+                    validate_operand_global(lhs, global_symbols, function, block, diagnostics);
+                    validate_operand_global(rhs, global_symbols, function, block, diagnostics);
                 }
                 Instruction::PackEnv { result: _, captures } => {
                     for capture in captures {
                         validate_operand_defined(
                             capture,
                             &defined_registers,
+                            function,
+                            block,
+                            diagnostics,
+                        );
+                        validate_operand_global(
+                            capture,
+                            global_symbols,
                             function,
                             block,
                             diagnostics,
@@ -197,6 +208,13 @@ fn validate_function(
                                 block,
                                 diagnostics,
                             );
+                            validate_operand_global(
+                                arg,
+                                global_symbols,
+                                function,
+                                block,
+                                diagnostics,
+                            );
                             if operand_type(arg) != *expected {
                                 diagnostics.push(ValidationDiagnostic {
                                     function: Some(function.name.clone()),
@@ -215,7 +233,14 @@ fn validate_function(
             }
         }
 
-        validate_terminator(function, block, &block_labels, &defined_registers, diagnostics);
+        validate_terminator(
+            function,
+            block,
+            &block_labels,
+            &defined_registers,
+            global_symbols,
+            diagnostics,
+        );
     }
 }
 
@@ -232,6 +257,24 @@ fn validate_operand_defined(
                 function: Some(function.name.clone()),
                 block: Some(block.label.clone()),
                 message: format!("use of undefined register '{}'", name),
+            });
+        }
+    }
+}
+
+fn validate_operand_global(
+    operand: &Operand,
+    global_symbols: &BTreeSet<String>,
+    function: &Function,
+    block: &crate::llvm::Block,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    if let Operand::Global(name, _) = operand {
+        if !global_symbols.contains(name) {
+            diagnostics.push(ValidationDiagnostic {
+                function: Some(function.name.clone()),
+                block: Some(block.label.clone()),
+                message: format!("use of unknown global '@{}'", name),
             });
         }
     }
@@ -254,12 +297,14 @@ fn validate_terminator(
     block: &crate::llvm::Block,
     block_labels: &BTreeSet<String>,
     defined_registers: &BTreeSet<String>,
+    global_symbols: &BTreeSet<String>,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     match &block.terminator {
         Terminator::Ret(value) => match value {
             Some(value) if operand_type(value) != function.ret => {
                 validate_operand_defined(value, defined_registers, function, block, diagnostics);
+                validate_operand_global(value, global_symbols, function, block, diagnostics);
                 diagnostics.push(ValidationDiagnostic {
                     function: Some(function.name.clone()),
                     block: Some(block.label.clone()),
@@ -277,6 +322,7 @@ fn validate_terminator(
             }),
             Some(value) => {
                 validate_operand_defined(value, defined_registers, function, block, diagnostics);
+                validate_operand_global(value, global_symbols, function, block, diagnostics);
             }
             None => {}
         },
@@ -295,6 +341,7 @@ fn validate_terminator(
             else_label,
         } => {
             validate_operand_defined(cond, defined_registers, function, block, diagnostics);
+            validate_operand_global(cond, global_symbols, function, block, diagnostics);
             if operand_type(cond) != Type::I1 {
                 diagnostics.push(ValidationDiagnostic {
                     function: Some(function.name.clone()),
@@ -323,6 +370,7 @@ fn validate_terminator(
             fallback,
         } => {
             validate_operand_defined(scrutinee, defined_registers, function, block, diagnostics);
+            validate_operand_global(scrutinee, global_symbols, function, block, diagnostics);
             for (_, target) in arms {
                 if !block_labels.contains(target) {
                     diagnostics.push(ValidationDiagnostic {
@@ -511,6 +559,52 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("expects i1 condition")));
+    }
+
+    #[test]
+    fn accepts_declared_global_operand() {
+        let module = Module {
+            globals: vec![crate::llvm::GlobalString {
+                symbol: ".str0".into(),
+                value: "hello".into(),
+            }],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::Ptr,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![],
+                    terminator: Terminator::Ret(Some(Operand::Global(".str0".into(), Type::Ptr))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
+    }
+
+    #[test]
+    fn rejects_unknown_global_operand() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::Ptr,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![],
+                    terminator: Terminator::Ret(Some(Operand::Global(".missing".into(), Type::Ptr))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("use of unknown global '@.missing'")));
     }
 
     #[test]
