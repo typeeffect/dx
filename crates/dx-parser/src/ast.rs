@@ -73,7 +73,27 @@ pub enum Expr {
         branches: Vec<(Expr, Vec<Stmt>)>,
         else_branch: Option<Vec<Stmt>>,
     },
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
     Placeholder,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Name(String),
+    Wildcard,
+    Constructor {
+        name: String,
+        args: Vec<Pattern>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

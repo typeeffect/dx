@@ -1,6 +1,6 @@
 use crate::ast::{
-    Arg, Expr, FunctionDecl, ImportPyDecl, Item, LambdaBody, LambdaParam, Module, Param, Stmt,
-    TypeExpr,
+    Arg, Expr, FunctionDecl, ImportPyDecl, Item, LambdaBody, LambdaParam, MatchArm, Module,
+    Param, Pattern, Stmt, TypeExpr,
 };
 use crate::token::{Keyword, Token, TokenKind};
 
@@ -208,11 +208,110 @@ impl Parser {
             return self.parse_lazy_expr();
         }
 
+        if self.at_keyword(Keyword::If) {
+            return self.parse_if_expr();
+        }
+
+        if self.at_keyword(Keyword::Match) {
+            return self.parse_match_expr();
+        }
+
         if let Some(expr) = self.try_parse_lambda()? {
             return Ok(expr);
         }
 
         self.parse_postfix_expr()
+    }
+
+    fn parse_if_expr(&mut self) -> Result<Expr, ParseError> {
+        self.expect_keyword(Keyword::If)?;
+        let cond = self.parse_expr()?;
+        self.expect(TokenKind::Colon)?;
+        let then_body = self.parse_block_stmts()?;
+
+        let mut branches = vec![(cond, then_body)];
+
+        while self.at_keyword(Keyword::Elif) {
+            self.bump();
+            let elif_cond = self.parse_expr()?;
+            self.expect(TokenKind::Colon)?;
+            let elif_body = self.parse_block_stmts()?;
+            branches.push((elif_cond, elif_body));
+        }
+
+        let else_branch = if self.at_keyword(Keyword::Else) {
+            self.bump();
+            self.expect(TokenKind::Colon)?;
+            Some(self.parse_block_stmts()?)
+        } else {
+            None
+        };
+
+        self.expect(TokenKind::Dot)?;
+        self.consume_optional_newline();
+
+        Ok(Expr::If {
+            branches,
+            else_branch,
+        })
+    }
+
+    /// Parse statements inside a block until we hit `.`, `elif`, or `else`.
+    /// Does NOT consume the terminator.
+    fn parse_block_stmts(&mut self) -> Result<Vec<Stmt>, ParseError> {
+        let mut body = Vec::new();
+        self.skip_newlines();
+        while !self.at(TokenKind::Dot)
+            && !self.at_keyword(Keyword::Elif)
+            && !self.at_keyword(Keyword::Else)
+        {
+            if self.at_eof() {
+                return Err(ParseError::new("unterminated block"));
+            }
+            body.push(self.parse_stmt()?);
+            self.skip_newlines();
+        }
+        Ok(body)
+    }
+
+    fn parse_match_expr(&mut self) -> Result<Expr, ParseError> {
+        self.expect_keyword(Keyword::Match)?;
+        let scrutinee = self.parse_expr()?;
+        self.expect(TokenKind::Colon)?;
+
+        let mut arms = Vec::new();
+        self.skip_newlines();
+        while !self.at(TokenKind::Dot) {
+            if self.at_eof() {
+                return Err(ParseError::new("unterminated match expression"));
+            }
+            let pattern = self.parse_pattern()?;
+            self.expect(TokenKind::Colon)?;
+            let body = self.parse_match_arm_body()?;
+            arms.push(MatchArm { pattern, body });
+            self.skip_newlines();
+        }
+
+        self.expect(TokenKind::Dot)?;
+        self.consume_optional_newline();
+
+        Ok(Expr::Match {
+            scrutinee: Box::new(scrutinee),
+            arms,
+        })
+    }
+
+    fn parse_match_arm_body(&mut self) -> Result<Vec<Stmt>, ParseError> {
+        let mut body = Vec::new();
+        self.skip_newlines();
+        while !self.at(TokenKind::Dot) && !self.starts_match_arm() {
+            if self.at_eof() {
+                return Err(ParseError::new("unterminated match arm"));
+            }
+            body.push(self.parse_stmt()?);
+            self.skip_newlines();
+        }
+        Ok(body)
     }
 
     fn try_parse_lambda(&mut self) -> Result<Option<Expr>, ParseError> {
@@ -389,6 +488,39 @@ impl Parser {
         }
     }
 
+    fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
+        match self.peek_kind().cloned() {
+            Some(TokenKind::Underscore) => {
+                self.bump();
+                Ok(Pattern::Wildcard)
+            }
+            Some(TokenKind::Identifier(name)) => {
+                self.bump();
+                if self.at(TokenKind::LParen) {
+                    self.bump();
+                    let mut args = Vec::new();
+                    if !self.at(TokenKind::RParen) {
+                        loop {
+                            args.push(self.parse_pattern()?);
+                            if !self.at(TokenKind::Comma) {
+                                break;
+                            }
+                            self.bump();
+                        }
+                    }
+                    self.expect(TokenKind::RParen)?;
+                    Ok(Pattern::Constructor { name, args })
+                } else {
+                    Ok(Pattern::Name(name))
+                }
+            }
+            other => Err(ParseError::new(format!(
+                "unexpected token in pattern: {:?}",
+                other
+            ))),
+        }
+    }
+
     fn consume_optional_newline(&mut self) {
         if self.at(TokenKind::Newline) {
             self.bump();
@@ -412,6 +544,49 @@ impl Parser {
 
     fn at_eof(&self) -> bool {
         matches!(self.peek_kind(), Some(TokenKind::Eof) | None)
+    }
+
+    fn starts_match_arm(&self) -> bool {
+        let mut pos = self.pos;
+        while matches!(
+            self.tokens.get(pos).map(|t| &t.kind),
+            Some(TokenKind::Newline)
+        ) {
+            pos += 1;
+        }
+
+        match self.tokens.get(pos).map(|t| &t.kind) {
+            Some(TokenKind::Underscore) => matches!(
+                self.tokens.get(pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Colon)
+            ),
+            Some(TokenKind::Identifier(_)) => match self.tokens.get(pos + 1).map(|t| &t.kind) {
+                Some(TokenKind::Colon) => true,
+                Some(TokenKind::LParen) => {
+                    let mut depth = 1usize;
+                    let mut i = pos + 2;
+                    while let Some(kind) = self.tokens.get(i).map(|t| &t.kind) {
+                        match kind {
+                            TokenKind::LParen => depth += 1,
+                            TokenKind::RParen => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    return matches!(
+                                        self.tokens.get(i + 1).map(|t| &t.kind),
+                                        Some(TokenKind::Colon)
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                        i += 1;
+                    }
+                    false
+                }
+                _ => false,
+            },
+            _ => false,
+        }
     }
 
     fn expect_keyword(&mut self, keyword: Keyword) -> Result<(), ParseError> {
@@ -554,6 +729,77 @@ fun debug(enabled: Bool, msg: lazy Str !io) -> Unit !io:
                     }
                 );
             }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_match_with_constructor_and_wildcard_patterns() {
+        let src = r#"
+fun unwrap(x: Result) -> Int:
+    match x:
+        Ok(v):
+            v
+        Err(_):
+            0
+    .
+.
+"#;
+        let tokens = Lexer::new(src).tokenize();
+        let mut parser = Parser::new(tokens);
+        let module = parser.parse_module().expect("module should parse");
+        match &module.items[0] {
+            Item::Function(function) => match &function.body[0] {
+                Stmt::Expr(Expr::Match { arms, .. }) => {
+                    assert_eq!(arms.len(), 2);
+                    assert_eq!(
+                        arms[0].pattern,
+                        Pattern::Constructor {
+                            name: "Ok".to_string(),
+                            args: vec![Pattern::Name("v".to_string())],
+                        }
+                    );
+                    assert_eq!(
+                        arms[1].pattern,
+                        Pattern::Constructor {
+                            name: "Err".to_string(),
+                            args: vec![Pattern::Wildcard],
+                        }
+                    );
+                }
+                other => panic!("expected match expression, got {other:?}"),
+            },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_if_with_elif_and_else() {
+        let src = r#"
+fun classify(flag: Bool, other: Bool) -> Str:
+    if flag:
+        "yes"
+    elif other:
+        "maybe"
+    else:
+        "no"
+    .
+.
+"#;
+        let tokens = Lexer::new(src).tokenize();
+        let mut parser = Parser::new(tokens);
+        let module = parser.parse_module().expect("module should parse");
+        match &module.items[0] {
+            Item::Function(function) => match &function.body[0] {
+                Stmt::Expr(Expr::If {
+                    branches,
+                    else_branch,
+                }) => {
+                    assert_eq!(branches.len(), 2);
+                    assert!(else_branch.is_some());
+                }
+                other => panic!("expected if expression, got {other:?}"),
+            },
             other => panic!("expected function, got {other:?}"),
         }
     }
