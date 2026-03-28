@@ -58,6 +58,7 @@ Short version:
 - LLM-friendly syntax and tooling
 - No source compatibility promise with Python
 - Strong interop with Python where useful
+- Result-first error handling with explicit `!throw` at foreign/runtime boundaries
 
 ### What `dx` keeps from Python
 

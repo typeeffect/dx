@@ -265,6 +265,7 @@ Included:
 - Python boundary hooks
 - error/throw boundary hooks
 - closure/thunk calling convention
+- distinction between `Result` data lowering, `!throw` propagation, and panic paths
 
 Exit criteria:
 

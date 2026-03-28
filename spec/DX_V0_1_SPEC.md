@@ -378,6 +378,12 @@ fun read(path: Str) -> Str !io:
 - `!throw`: may fail via exception-like propagation
 - `!wait`: may suspend / participate in structured concurrency
 
+Error-model policy:
+
+- `Result[T, E]` is the preferred mechanism for recoverable domain errors
+- `!throw` is reserved for foreign/runtime exception-style propagation
+- `panic` is reserved for bugs and invariant violations
+
 ### 6.4 Effect propagation
 
 Operational rule:
