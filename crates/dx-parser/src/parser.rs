@@ -1916,4 +1916,310 @@ fun classify(flag: Bool, other: Bool) -> Str:
             }
         );
     }
+
+    // ── binary operators: basic ──────────────────────────────────
+
+    #[test]
+    fn simple_addition() {
+        let m = parse("fun f(a: Int, b: Int) -> Int:\n    a + b\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, lhs, rhs } => {
+                assert_eq!(*op, BinOp::Add);
+                assert!(matches!(lhs.as_ref(), Expr::Name(n) if n == "a"));
+                assert!(matches!(rhs.as_ref(), Expr::Name(n) if n == "b"));
+            }
+            other => panic!("expected BinaryOp(Add), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_subtraction() {
+        let m = parse("fun f(n: Int) -> Int:\n    n - 1\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Sub),
+            other => panic!("expected BinaryOp(Sub), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_multiplication() {
+        let m = parse("fun f(a: Int, b: Int) -> Int:\n    a * b\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Mul),
+            other => panic!("expected BinaryOp(Mul), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_lt() {
+        let m = parse("fun f(x: Int) -> Bool:\n    x < 0\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Lt),
+            other => panic!("expected BinaryOp(Lt), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_lt_eq() {
+        let m = parse("fun f(n: Int) -> Bool:\n    n <= 1\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::LtEq),
+            other => panic!("expected BinaryOp(LtEq), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_eq_eq() {
+        let m = parse("fun f(x: Int) -> Bool:\n    x == 0\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::EqEq),
+            other => panic!("expected BinaryOp(EqEq), got {other:?}"),
+        }
+    }
+
+    // ── binary operators: precedence ─────────────────────────────
+
+    #[test]
+    fn mul_binds_tighter_than_add() {
+        // a + b * c  should parse as  a + (b * c)
+        let m = parse("fun f(a: Int, b: Int, c: Int) -> Int:\n    a + b * c\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, lhs, rhs } => {
+                assert_eq!(*op, BinOp::Add);
+                assert!(matches!(lhs.as_ref(), Expr::Name(n) if n == "a"));
+                match rhs.as_ref() {
+                    Expr::BinaryOp { op, lhs, rhs } => {
+                        assert_eq!(*op, BinOp::Mul);
+                        assert!(matches!(lhs.as_ref(), Expr::Name(n) if n == "b"));
+                        assert!(matches!(rhs.as_ref(), Expr::Name(n) if n == "c"));
+                    }
+                    other => panic!("expected Mul on rhs, got {other:?}"),
+                }
+            }
+            other => panic!("expected BinaryOp(Add), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn comparison_lower_than_arithmetic() {
+        // a + b < c  should parse as  (a + b) < c
+        let m = parse("fun f(a: Int, b: Int, c: Int) -> Bool:\n    a + b < c\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, lhs, rhs } => {
+                assert_eq!(*op, BinOp::Lt);
+                match lhs.as_ref() {
+                    Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Add),
+                    other => panic!("expected Add on lhs, got {other:?}"),
+                }
+                assert!(matches!(rhs.as_ref(), Expr::Name(n) if n == "c"));
+            }
+            other => panic!("expected BinaryOp(Lt), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn left_associative_addition() {
+        // a + b + c  should parse as  (a + b) + c
+        let m = parse("fun f(a: Int, b: Int, c: Int) -> Int:\n    a + b + c\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, lhs, rhs } => {
+                assert_eq!(*op, BinOp::Add);
+                match lhs.as_ref() {
+                    Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Add),
+                    other => panic!("expected Add on lhs, got {other:?}"),
+                }
+                assert!(matches!(rhs.as_ref(), Expr::Name(n) if n == "c"));
+            }
+            other => panic!("expected BinaryOp(Add), got {other:?}"),
+        }
+    }
+
+    // ── binary operators: with member access and calls ───────────
+
+    #[test]
+    fn member_access_binds_tighter_than_operators() {
+        // a'x + b'y  should parse as  (a'x) + (b'y)
+        let m = parse("fun f(a: A, b: B) -> Int:\n    a'x + b'y\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, lhs, rhs } => {
+                assert_eq!(*op, BinOp::Add);
+                assert!(matches!(lhs.as_ref(), Expr::Member { name, .. } if name == "x"));
+                assert!(matches!(rhs.as_ref(), Expr::Member { name, .. } if name == "y"));
+            }
+            other => panic!("expected BinaryOp(Add), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn comparison_with_member_access() {
+        // a'age < b'age
+        let m = parse("fun f(a: User, b: User) -> Bool:\n    a'age < b'age\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, lhs, rhs } => {
+                assert_eq!(*op, BinOp::Lt);
+                assert!(matches!(lhs.as_ref(), Expr::Member { name, .. } if name == "age"));
+                assert!(matches!(rhs.as_ref(), Expr::Member { name, .. } if name == "age"));
+            }
+            other => panic!("expected BinaryOp(Lt), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subtraction_in_call_arg() {
+        // fact(n - 1)
+        let m = parse("fun f(n: Int) -> Int:\n    f(n - 1)\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::Call { args, .. } => match &args[0] {
+                Arg::Positional(Expr::BinaryOp { op, .. }) => assert_eq!(*op, BinOp::Sub),
+                other => panic!("expected BinaryOp(Sub) in arg, got {other:?}"),
+            },
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multiplication_in_call_arg() {
+        // n * fact(n - 1)  should parse as  n * (fact(n - 1))
+        let m = parse("fun f(n: Int) -> Int:\n    n * f(n - 1)\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, lhs, rhs } => {
+                assert_eq!(*op, BinOp::Mul);
+                assert!(matches!(lhs.as_ref(), Expr::Name(n) if n == "n"));
+                assert!(matches!(rhs.as_ref(), Expr::Call { .. }));
+            }
+            other => panic!("expected BinaryOp(Mul), got {other:?}"),
+        }
+    }
+
+    // ── binary operators: in if conditions ───────────────────────
+
+    #[test]
+    fn comparison_in_if_condition() {
+        let m = parse("fun f(n: Int) -> Int:\n    if n <= 1:\n        1\n    else:\n        n\n    .\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::If { branches, .. } => {
+                match &branches[0].0 {
+                    Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::LtEq),
+                    other => panic!("expected LtEq condition, got {other:?}"),
+                }
+            }
+            other => panic!("expected If, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eq_eq_in_elif_condition() {
+        let m = parse("fun f(x: Int) -> Str:\n    if x < 0:\n        \"neg\"\n    elif x == 0:\n        \"zero\"\n    else:\n        \"pos\"\n    .\n.\n");
+        let f = first_fun(&m);
+        match first_stmt_expr(&f.body) {
+            Expr::If { branches, .. } => {
+                assert_eq!(branches.len(), 2);
+                match &branches[0].0 {
+                    Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Lt),
+                    other => panic!("expected Lt condition, got {other:?}"),
+                }
+                match &branches[1].0 {
+                    Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::EqEq),
+                    other => panic!("expected EqEq condition, got {other:?}"),
+                }
+            }
+            other => panic!("expected If, got {other:?}"),
+        }
+    }
+
+    // ── binary operators: string concat ──────────────────────────
+
+    #[test]
+    fn string_concat_with_plus() {
+        let m = parse("fun f() -> Str:\n    me'first + \" \" + me'last\n.\n");
+        let f = first_fun(&m);
+        // Should be ((me'first + " ") + me'last) — left-associative
+        match first_stmt_expr(&f.body) {
+            Expr::BinaryOp { op, lhs, rhs } => {
+                assert_eq!(*op, BinOp::Add);
+                match lhs.as_ref() {
+                    Expr::BinaryOp { op, lhs, rhs } => {
+                        assert_eq!(*op, BinOp::Add);
+                        assert!(matches!(lhs.as_ref(), Expr::Member { .. }));
+                        assert!(matches!(rhs.as_ref(), Expr::String(s) if s == " "));
+                    }
+                    other => panic!("expected inner Add, got {other:?}"),
+                }
+                assert!(matches!(rhs.as_ref(), Expr::Member { .. }));
+            }
+            other => panic!("expected BinaryOp(Add), got {other:?}"),
+        }
+    }
+
+    // ── binary operators: val binding ────────────────────────────
+
+    #[test]
+    fn operator_in_val_binding() {
+        let m = parse("fun f(a: Int, b: Int) -> Int:\n    val total = a + b * 2\n    total\n.\n");
+        let f = first_fun(&m);
+        match &f.body[0] {
+            Stmt::ValBind { name, value } => {
+                assert_eq!(name, "total");
+                match value {
+                    Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Add),
+                    other => panic!("expected BinaryOp(Add), got {other:?}"),
+                }
+            }
+            other => panic!("expected ValBind, got {other:?}"),
+        }
+    }
+
+    // ── full example: recursive factorial ────────────────────────
+
+    #[test]
+    fn factorial_full() {
+        let m = parse(
+            "fun fact(n: Int) -> Int:\n    if n <= 1:\n        1\n    else:\n        n * fact(n - 1)\n    .\n.\n",
+        );
+        let f = first_fun(&m);
+        assert_eq!(f.name, "fact");
+        match first_stmt_expr(&f.body) {
+            Expr::If { branches, else_branch } => {
+                // condition: n <= 1
+                assert!(matches!(&branches[0].0, Expr::BinaryOp { op: BinOp::LtEq, .. }));
+                // else body: n * fact(n - 1)
+                let else_stmts = else_branch.as_ref().unwrap();
+                match first_stmt_expr(else_stmts) {
+                    Expr::BinaryOp { op, lhs, rhs } => {
+                        assert_eq!(*op, BinOp::Mul);
+                        assert!(matches!(lhs.as_ref(), Expr::Name(n) if n == "n"));
+                        match rhs.as_ref() {
+                            Expr::Call { callee, args } => {
+                                assert!(matches!(callee.as_ref(), Expr::Name(n) if n == "fact"));
+                                assert_eq!(args.len(), 1);
+                                match &args[0] {
+                                    Arg::Positional(Expr::BinaryOp { op, .. }) => {
+                                        assert_eq!(*op, BinOp::Sub);
+                                    }
+                                    other => panic!("expected Sub in call arg, got {other:?}"),
+                                }
+                            }
+                            other => panic!("expected Call, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected BinaryOp(Mul), got {other:?}"),
+                }
+            }
+            other => panic!("expected If, got {other:?}"),
+        }
+    }
 }
