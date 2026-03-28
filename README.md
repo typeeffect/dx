@@ -17,6 +17,7 @@ Current focus:
   - design critique
   - Python interop architecture
   - AD / probabilistic programming direction
+  - implementation roadmap
 - `spec/`
   - v0.1 core spec
 - `examples/`
@@ -53,3 +54,4 @@ See also:
 
 - `docs/PY_INTEROP_ARCHITECTURE.md`
 - `docs/DX_AD_PPL_DIRECTION.md`
+- `docs/DX_IMPLEMENTATION_ROADMAP.md`

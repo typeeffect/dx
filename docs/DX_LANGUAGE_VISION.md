@@ -971,3 +971,9 @@ That means:
 
 This is the design center.
 It is intentionally not "Python, but stricter".
+
+## Implementation Follow-Up
+
+The concrete near-term build order is tracked in:
+
+- `DX_IMPLEMENTATION_ROADMAP.md`
