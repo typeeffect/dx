@@ -360,6 +360,16 @@ fn validate_operand_global(
                 block: Some(block.label.clone()),
                 message: format!("use of unknown global '@{}'", name),
             });
+        } else if operand_type(operand) != Type::Ptr {
+            diagnostics.push(ValidationDiagnostic {
+                function: Some(function.name.clone()),
+                block: Some(block.label.clone()),
+                message: format!(
+                    "global operand '@{}' must have Ptr type, got {:?}",
+                    name,
+                    operand_type(operand)
+                ),
+            });
         }
     }
 }
@@ -689,6 +699,32 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("use of unknown global '@.missing'")));
+    }
+
+    #[test]
+    fn rejects_global_operand_with_non_ptr_type() {
+        let module = Module {
+            globals: vec![crate::llvm::GlobalString {
+                symbol: ".str0".into(),
+                value: "hello".into(),
+            }],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::I64,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![],
+                    terminator: Terminator::Ret(Some(Operand::Global(".str0".into(), Type::I64))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("global operand '@.str0' must have Ptr type")));
     }
 
     #[test]
