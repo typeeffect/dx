@@ -1,8 +1,10 @@
 pub mod emit;
+pub mod link;
 pub mod pipeline;
 pub mod toolchain;
 
 pub use emit::{emit_module, EmitError};
+pub use link::{build_link_command_plan, render_link_plan, LinkCommandPlan};
 pub use pipeline::{
     emit_file_to_path,
     emit_file_to_path_and_verify,
