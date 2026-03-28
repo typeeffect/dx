@@ -238,6 +238,10 @@ impl Checker {
         scope: &mut Scope,
     ) -> typed::Expr {
         match expr {
+            hir::Expr::Unit => typed::Expr {
+                ty: Type::Unit,
+                kind: typed::ExprKind::Unit,
+            },
             hir::Expr::Name(name) => typed::Expr {
                 ty: scope
                     .lookup(name)
@@ -255,8 +259,12 @@ impl Checker {
             },
             hir::Expr::Member { base, name } => {
                 let base = Box::new(self.typecheck_expr(function_name, base, scope));
+                let ty = match base.ty {
+                    Type::PyObj => Type::PyObj,
+                    _ => Type::Unknown,
+                };
                 typed::Expr {
-                    ty: Type::Unknown,
+                    ty,
                     kind: typed::ExprKind::Member {
                         base,
                         name: name.clone(),
@@ -278,9 +286,14 @@ impl Checker {
                     })
                     .collect();
 
-                let target = self.classify_call_target(callee, scope);
-                let ret =
-                    self.infer_call_type(function_name, callee, &callee_typed.ty, &typed_args, scope);
+                let target = self.classify_call_target(callee, &callee_typed, scope);
+                let ret = self.infer_call_type(
+                    function_name,
+                    callee,
+                    &callee_typed,
+                    &typed_args,
+                    scope,
+                );
                 typed::Expr {
                     ty: ret,
                     kind: typed::ExprKind::Call {
@@ -427,7 +440,7 @@ impl Checker {
         &mut self,
         function_name: &str,
         callee_hir: &hir::Expr,
-        callee_type: &Type,
+        callee_typed: &typed::Expr,
         args: &[typed::Arg],
         scope: &Scope,
     ) -> Type {
@@ -451,7 +464,10 @@ impl Checker {
             }
         }
 
-        if let Type::Function { params, ret, .. } = callee_type {
+        if let Type::Function {
+            params, ret, ..
+        } = &callee_typed.ty
+        {
             if params.len() != args.len() {
                 self.diag(
                     function_name,
@@ -463,6 +479,10 @@ impl Checker {
                 );
             }
             return (**ret).clone();
+        }
+
+        if matches!(callee_typed.ty, Type::PyObj) {
+            return Type::PyObj;
         }
 
         Type::Unknown
@@ -499,7 +519,7 @@ impl Checker {
                     Type::Unknown
                 }
             },
-            BinOp::Lt | BinOp::LtEq | BinOp::EqEq => {
+            BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq | BinOp::EqEq => {
                 if !lhs.is_unknown() && !rhs.is_unknown() && lhs != rhs {
                     self.diag(
                         function_name,
@@ -521,10 +541,18 @@ impl Checker {
         });
     }
 
-    fn classify_call_target(&self, callee_hir: &hir::Expr, scope: &Scope) -> typed::CallTarget {
+    fn classify_call_target(
+        &self,
+        callee_hir: &hir::Expr,
+        callee_typed: &typed::Expr,
+        scope: &Scope,
+    ) -> typed::CallTarget {
         match callee_hir {
             hir::Expr::Name(name) if self.imported_py.contains(name) => {
                 typed::CallTarget::PythonFunction { name: name.clone() }
+            }
+            hir::Expr::Member { name, .. } if matches!(callee_typed.ty, Type::PyObj) => {
+                typed::CallTarget::PythonMember { name: name.clone() }
             }
             hir::Expr::Name(name) => {
                 if let Some(binding) = scope.lookup(name) {
@@ -541,6 +569,7 @@ impl Checker {
                     typed::CallTarget::Dynamic
                 }
             }
+            _ if matches!(callee_typed.ty, Type::PyObj) => typed::CallTarget::PythonDynamic,
             _ => typed::CallTarget::Dynamic,
         }
     }
@@ -772,6 +801,31 @@ mod tests {
                 }
                 other => panic!("expected call result, got {other:?}"),
             },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_python_member_calls() {
+        let report = check(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py:\n    read_csv(path)'head()\n.\n",
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[1] {
+            typed::Item::Function(function) => {
+                assert_eq!(function.body.ty, Type::PyObj);
+                match function.body.result.as_ref().map(|e| &e.kind) {
+                    Some(typed::ExprKind::Call { target, .. }) => {
+                        assert_eq!(
+                            target,
+                            &typed::CallTarget::PythonMember {
+                                name: "head".to_string()
+                            }
+                        );
+                    }
+                    other => panic!("expected call result, got {other:?}"),
+                }
+            }
             other => panic!("expected function, got {other:?}"),
         }
     }

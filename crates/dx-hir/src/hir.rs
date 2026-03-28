@@ -50,6 +50,7 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    Unit,
     Name(String),
     Integer(String),
     String(String),

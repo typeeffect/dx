@@ -129,6 +129,16 @@ impl Lowerer {
         env: &HashMap<String, mir::LocalId>,
     ) -> mir::BlockId {
         match &expr.kind {
+            typed::ExprKind::Unit => {
+                builder.push_statement(
+                    current_bb,
+                    mir::Statement::Assign {
+                        place: dest,
+                        value: mir::Rvalue::Use(mir::Operand::Const(mir::Constant::Unit)),
+                    },
+                );
+                current_bb
+            }
             typed::ExprKind::Name(name) => {
                 if let Some(local) = env.get(name) {
                     builder.push_statement(
@@ -274,6 +284,7 @@ impl Lowerer {
         env: &HashMap<String, mir::LocalId>,
     ) -> (mir::BlockId, mir::Operand) {
         match &expr.kind {
+            typed::ExprKind::Unit => (current_bb, mir::Operand::Const(mir::Constant::Unit)),
             typed::ExprKind::Name(name) => env
                 .get(name)
                 .copied()
@@ -572,6 +583,31 @@ mod tests {
                     other => panic!("expected call rvalue, got {other:?}"),
                 },
             },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preserves_python_member_call_target() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py:\n    read_csv(path)'head()\n.\n",
+        );
+        match &module.items[1] {
+            mir::Item::Function(function) => {
+                let found = function.blocks[0].statements.iter().any(|stmt| {
+                    matches!(
+                        stmt,
+                        mir::Statement::Assign {
+                            value: mir::Rvalue::Call {
+                                target: typed::CallTarget::PythonMember { name },
+                                ..
+                            },
+                            ..
+                        } if name == "head"
+                    )
+                });
+                assert!(found, "expected Python member call target in block 0");
+            }
             other => panic!("expected function, got {other:?}"),
         }
     }

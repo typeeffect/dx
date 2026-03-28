@@ -132,7 +132,7 @@ fn resolve_expr(
                 });
             }
         }
-        hir::Expr::Integer(_) | hir::Expr::String(_) => {}
+        hir::Expr::Unit | hir::Expr::Integer(_) | hir::Expr::String(_) => {}
         hir::Expr::Member { base, .. } => resolve_expr(function_name, base, scope, diagnostics),
         hir::Expr::Call { callee, args } => {
             resolve_expr(function_name, callee, scope, diagnostics);

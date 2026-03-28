@@ -136,6 +136,7 @@ impl Lowerer {
         current_it: &Option<String>,
     ) -> hir::Expr {
         match expr {
+            ast::Expr::Unit => hir::Expr::Unit,
             ast::Expr::Name(name) if name == "it" => hir::Expr::Name(
                 current_it
                     .clone()
@@ -280,7 +281,9 @@ fn contains_placeholder(expr: &ast::Expr) -> bool {
         ast::Expr::BinaryOp { lhs, rhs, .. } => {
             contains_placeholder(lhs) || contains_placeholder(rhs)
         }
-        ast::Expr::Name(_) | ast::Expr::Integer(_) | ast::Expr::String(_) => false,
+        ast::Expr::Unit | ast::Expr::Name(_) | ast::Expr::Integer(_) | ast::Expr::String(_) => {
+            false
+        }
     }
 }
 
@@ -295,6 +298,7 @@ fn stmts_contain_placeholder(stmts: &[ast::Stmt]) -> bool {
 
 fn replace_placeholder(expr: &ast::Expr, param_name: &str) -> ast::Expr {
     match expr {
+        ast::Expr::Unit => ast::Expr::Unit,
         ast::Expr::Placeholder => ast::Expr::Name(param_name.to_string()),
         ast::Expr::Name(name) => ast::Expr::Name(name.clone()),
         ast::Expr::Integer(value) => ast::Expr::Integer(value.clone()),

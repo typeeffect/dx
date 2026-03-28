@@ -58,6 +58,7 @@ pub struct Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
+    Unit,
     Name(String),
     Integer(String),
     String(String),
@@ -93,6 +94,8 @@ pub enum ExprKind {
 pub enum CallTarget {
     NativeFunction { name: String },
     PythonFunction { name: String },
+    PythonMember { name: String },
+    PythonDynamic,
     LocalClosure { name: String },
     Dynamic,
 }

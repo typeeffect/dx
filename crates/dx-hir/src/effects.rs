@@ -165,7 +165,9 @@ fn infer_expr_effects(
     local_closures: &mut HashMap<String, EffectSet>,
 ) -> EffectSet {
     match expr {
-        hir::Expr::Name(_) | hir::Expr::Integer(_) | hir::Expr::String(_) => EffectSet::new(),
+        hir::Expr::Unit | hir::Expr::Name(_) | hir::Expr::Integer(_) | hir::Expr::String(_) => {
+            EffectSet::new()
+        }
         hir::Expr::Member { base, .. } => {
             infer_expr_effects(base, function_effects, imported_py_names, local_closures)
         }
@@ -300,7 +302,34 @@ fn call_target_effects(
             imported_py_names,
             &mut local_closures.clone(),
         ),
+        _ if is_python_value_expr(
+            callee,
+            function_effects,
+            imported_py_names,
+            local_closures,
+        ) => ["py".to_string()].into_iter().collect(),
         _ => EffectSet::new(),
+    }
+}
+
+fn is_python_value_expr(
+    expr: &hir::Expr,
+    function_effects: &HashMap<String, EffectSet>,
+    imported_py_names: &HashSet<String>,
+    local_closures: &HashMap<String, EffectSet>,
+) -> bool {
+    match expr {
+        hir::Expr::Name(name) => imported_py_names.contains(name),
+        hir::Expr::Member { base, .. } => {
+            is_python_value_expr(base, function_effects, imported_py_names, local_closures)
+        }
+        hir::Expr::Call { callee, .. } => {
+            let target_effects =
+                call_target_effects(callee, function_effects, imported_py_names, local_closures);
+            target_effects.contains("py")
+                || is_python_value_expr(callee, function_effects, imported_py_names, local_closures)
+        }
+        _ => false,
     }
 }
 
@@ -377,6 +406,25 @@ from py pandas import read_csv
 fun run(path: Str) -> PyObj !py:
     val thunk = lazy read_csv(path)
     thunk()
+.
+"#,
+        );
+
+        assert!(report.diagnostics.is_empty());
+        assert_eq!(
+            report.functions[0].inferred,
+            ["py".to_string()].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn chained_python_member_calls_still_require_py_effect() {
+        let report = analyze(
+            r#"
+from py pandas import read_csv
+
+fun load(path: Str) -> PyObj !py:
+    read_csv(path)'head()
 .
 "#,
         );
