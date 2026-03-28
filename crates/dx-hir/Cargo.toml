@@ -1,0 +1,8 @@
+[package]
+name = "dx-hir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dx-parser = { path = "../dx-parser" }
