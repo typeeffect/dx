@@ -1,5 +1,6 @@
 use crate::abi::{AbiType, PyRuntimePlan};
 use crate::closure::{ClosureAbiType, ClosureRuntimePlan};
+use crate::externs::{RuntimeExternAbiType, RuntimeExternPlan};
 use crate::lower::{LoweredPyCall, PyDispatchTarget};
 use crate::ops::{RuntimeOp, RuntimeOpKind, RuntimeOpsPlan};
 use crate::py::PyCallKind;
@@ -189,6 +190,46 @@ pub fn render_runtime_ops_plan(plan: &RuntimeOpsPlan) -> String {
     out
 }
 
+pub fn render_runtime_extern_plan(plan: &RuntimeExternPlan) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== Runtime Externs ===").unwrap();
+    writeln!(out).unwrap();
+
+    if plan.externs.is_empty() {
+        writeln!(out, "(none)").unwrap();
+    } else {
+        for ext in &plan.externs {
+            let params: Vec<&str> = ext
+                .signature
+                .params
+                .iter()
+                .map(render_extern_abi_type)
+                .collect();
+            writeln!(
+                out,
+                "  extern {} ({}) -> {}",
+                ext.signature.symbol,
+                params.join(", "),
+                render_extern_abi_type(&ext.signature.ret)
+            )
+            .unwrap();
+        }
+    }
+
+    out
+}
+
+fn render_extern_abi_type(ty: &RuntimeExternAbiType) -> &'static str {
+    match ty {
+        RuntimeExternAbiType::PyObjHandle => "PyObjHandle",
+        RuntimeExternAbiType::Utf8Ptr => "Utf8Ptr",
+        RuntimeExternAbiType::ClosureHandle => "ClosureHandle",
+        RuntimeExternAbiType::EnvHandle => "EnvHandle",
+        RuntimeExternAbiType::U32 => "U32",
+    }
+}
+
 fn render_closure_abi_type(ty: ClosureAbiType) -> &'static str {
     match ty {
         ClosureAbiType::ClosureHandle => "ClosureHandle",
@@ -265,7 +306,7 @@ mod tests {
     use super::*;
     use crate::abi::{build_python_runtime_plan, RuntimeHook};
     use crate::lower::lower_python_runtime_calls;
-    use crate::ops::build_runtime_ops_plan;
+    use crate::ops::{build_runtime_ops_plan, RuntimeHookKind};
     use dx_hir::{lower_module as lower_hir, typecheck_module};
     use dx_mir::{lower_module as lower_mir, mir};
     use dx_parser::{Lexer, Parser};
@@ -555,5 +596,230 @@ mod tests {
         assert!(out.contains("dx_rt_py_call_function"), "got:\n{out}");
         assert!(out.contains("pandas.read_csv(args=1)"), "got:\n{out}");
         assert!(out.contains("-> PyObj !py"), "got:\n{out}");
+    }
+
+    // ── targeted RuntimeOpsPlan scenarios ─────────────────────────
+
+    #[test]
+    fn ops_plan_python_only() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let out = render_runtime_ops_plan(&plan);
+
+        // Only python hooks
+        assert!(plan.required_hooks.iter().all(|h| matches!(h, RuntimeHookKind::Py(_))));
+        // Rendered shows destination, symbol, dispatch, result type, effects
+        assert!(out.contains("-> _"), "destination local missing:\n{out}");
+        assert!(out.contains("dx_rt_py_call_function"), "symbol missing:\n{out}");
+        assert!(out.contains("pandas.read_csv"), "dispatch missing:\n{out}");
+        assert!(out.contains("-> PyObj"), "result type missing:\n{out}");
+        assert!(out.contains("!py"), "effects missing:\n{out}");
+    }
+
+    #[test]
+    fn ops_plan_closure_only() {
+        let module = lower(
+            "fun make(x: Int) -> lazy Int:\n    val f = lazy x\n    f()\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let out = render_runtime_ops_plan(&plan);
+
+        // Only closure hooks
+        assert!(plan.required_hooks.iter().all(|h| matches!(h, RuntimeHookKind::Closure(_))));
+        assert!(out.contains("dx_rt_closure_create"), "create missing:\n{out}");
+        assert!(out.contains("dx_rt_thunk_call"), "thunk call missing:\n{out}");
+        assert!(out.contains("closure()"), "closure shape missing:\n{out}");
+        assert!(out.contains("thunk("), "thunk shape missing:\n{out}");
+    }
+
+    #[test]
+    fn ops_plan_python_and_closure_combined() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val thunk = lazy df\n    thunk()\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let out = render_runtime_ops_plan(&plan);
+
+        // Has both python and closure hooks
+        assert!(plan.required_hooks.iter().any(|h| matches!(h, RuntimeHookKind::Py(_))));
+        assert!(plan.required_hooks.iter().any(|h| matches!(h, RuntimeHookKind::Closure(_))));
+        assert!(out.contains("dx_rt_py_call_function"), "py hook missing:\n{out}");
+        assert!(out.contains("dx_rt_closure_create"), "create missing:\n{out}");
+        assert!(out.contains("dx_rt_thunk_call"), "thunk missing:\n{out}");
+    }
+
+    #[test]
+    fn ops_plan_multi_function_stable_ordering() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n\nfun make(x: Int) -> lazy Int:\n    lazy x\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+
+        // Ops sorted by function name, then block, then statement
+        let names: Vec<&str> = plan.ops.iter().map(|op| op.function.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted, "ops should be sorted by function name");
+
+        // Hooks are deduplicated
+        let hook_count = plan.required_hooks.len();
+        let deduped: std::collections::BTreeSet<_> = plan.required_hooks.iter().collect();
+        assert_eq!(hook_count, deduped.len(), "hooks should be deduplicated");
+    }
+
+    #[test]
+    fn ops_plan_thunk_with_py_throw_effects() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py !throw:\n    lazy read_csv(path)\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let out = render_runtime_ops_plan(&plan);
+
+        // Closure carries !py (from the closure plan effects)
+        assert!(out.contains("!py"), "py effect missing:\n{out}");
+        assert!(out.contains("closure()"), "closure shape missing:\n{out}");
+    }
+
+    #[test]
+    fn ops_plan_closure_capturing_pyobj() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun make(path: Str) -> lazy PyObj !py:\n    val df = read_csv(path)\n    lazy df\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let out = render_runtime_ops_plan(&plan);
+
+        // Py call + closure create with capture
+        assert!(out.contains("dx_rt_py_call_function"), "py call missing:\n{out}");
+        assert!(out.contains("dx_rt_closure_create"), "create missing:\n{out}");
+        assert!(out.contains("captures ["), "captures missing:\n{out}");
+    }
+
+    // ── RuntimeExternPlan rendering ──────────────────────────────
+
+    #[test]
+    fn extern_plan_python_only() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n",
+        );
+        let ops = build_runtime_ops_plan(&module);
+        let plan = crate::externs::build_runtime_extern_plan(&ops);
+        let out = render_runtime_extern_plan(&plan);
+
+        assert!(out.contains("=== Runtime Externs ==="), "got:\n{out}");
+        assert!(out.contains("extern dx_rt_py_call_function"), "got:\n{out}");
+        assert!(out.contains("(Utf8Ptr, U32) -> PyObjHandle"), "got:\n{out}");
+        // No closure externs
+        assert!(!out.contains("dx_rt_closure"), "got:\n{out}");
+    }
+
+    #[test]
+    fn extern_plan_closure_only() {
+        let module = lower(
+            "fun make(x: Int) -> lazy Int:\n    val f = lazy x\n    f()\n.\n",
+        );
+        let ops = build_runtime_ops_plan(&module);
+        let plan = crate::externs::build_runtime_extern_plan(&ops);
+        let out = render_runtime_extern_plan(&plan);
+
+        assert!(out.contains("extern dx_rt_closure_create"), "got:\n{out}");
+        assert!(out.contains("extern dx_rt_thunk_call"), "got:\n{out}");
+        // No python externs
+        assert!(!out.contains("dx_rt_py_call"), "got:\n{out}");
+    }
+
+    #[test]
+    fn extern_plan_mixed_python_and_closure() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val thunk = lazy df\n    thunk()\n.\n",
+        );
+        let ops = build_runtime_ops_plan(&module);
+        let plan = crate::externs::build_runtime_extern_plan(&ops);
+        let out = render_runtime_extern_plan(&plan);
+
+        assert!(out.contains("dx_rt_py_call_function"), "py extern missing:\n{out}");
+        assert!(out.contains("dx_rt_closure_create"), "closure create missing:\n{out}");
+        assert!(out.contains("dx_rt_thunk_call"), "thunk call missing:\n{out}");
+    }
+
+    #[test]
+    fn extern_plan_sorted_by_symbol() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val thunk = lazy df\n    thunk()\n.\n",
+        );
+        let ops = build_runtime_ops_plan(&module);
+        let plan = crate::externs::build_runtime_extern_plan(&ops);
+
+        let symbols: Vec<&str> = plan.externs.iter().map(|e| e.signature.symbol).collect();
+        let mut sorted = symbols.clone();
+        sorted.sort();
+        assert_eq!(symbols, sorted, "externs should be sorted by symbol");
+    }
+
+    #[test]
+    fn extern_plan_abi_types_are_readable() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)'head()\n.\n",
+        );
+        let ops = build_runtime_ops_plan(&module);
+        let plan = crate::externs::build_runtime_extern_plan(&ops);
+        let out = render_runtime_extern_plan(&plan);
+
+        // PyCallFunction: (Utf8Ptr, U32) -> PyObjHandle
+        assert!(out.contains("(Utf8Ptr, U32) -> PyObjHandle"), "py func abi:\n{out}");
+        // PyCallMethod: (PyObjHandle, Utf8Ptr, U32) -> PyObjHandle
+        assert!(
+            out.contains("(PyObjHandle, Utf8Ptr, U32) -> PyObjHandle"),
+            "py method abi:\n{out}"
+        );
+    }
+
+    #[test]
+    fn extern_plan_consistent_with_ops_hooks() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val thunk = lazy df\n    thunk()\n.\n",
+        );
+        let ops = build_runtime_ops_plan(&module);
+        let plan = crate::externs::build_runtime_extern_plan(&ops);
+
+        // Every hook in ops plan should have a corresponding extern
+        let extern_hooks: std::collections::BTreeSet<_> =
+            plan.externs.iter().map(|e| e.hook).collect();
+        for hook in &ops.required_hooks {
+            assert!(
+                extern_hooks.contains(hook),
+                "ops hook {:?} missing from externs",
+                hook
+            );
+        }
+        // And vice versa
+        assert_eq!(ops.required_hooks.len(), plan.externs.len());
+    }
+
+    #[test]
+    fn extern_plan_empty_module() {
+        let module = lower("fun f() -> Int:\n    1\n.\n");
+        let ops = build_runtime_ops_plan(&module);
+        let plan = crate::externs::build_runtime_extern_plan(&ops);
+        let out = render_runtime_extern_plan(&plan);
+
+        assert!(out.contains("(none)"), "got:\n{out}");
+        assert!(plan.externs.is_empty());
+    }
+
+    #[test]
+    fn extern_plan_with_py_throw_effects() {
+        // Module with !py !throw effects — externs should still be present
+        let module = lower(
+            "from py pandas import read_csv\n\nfun load(path: Str) -> PyObj !py !throw:\n    read_csv(path)\n.\n",
+        );
+        let ops = build_runtime_ops_plan(&module);
+        let plan = crate::externs::build_runtime_extern_plan(&ops);
+        let out = render_runtime_extern_plan(&plan);
+
+        assert!(out.contains("extern dx_rt_py_call_function"), "got:\n{out}");
+        // Effects don't change the extern signature
+        assert!(out.contains("(Utf8Ptr, U32) -> PyObjHandle"), "got:\n{out}");
     }
 }
