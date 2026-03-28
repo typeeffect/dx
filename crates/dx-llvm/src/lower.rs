@@ -2,7 +2,10 @@ use crate::llvm::{
     Block, ExternDecl, Function, GlobalString, Instruction, Module, Operand, Param, Terminator,
     Type,
 };
-use dx_codegen::{low, LowAssignValue, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowValue};
+use dx_codegen::{
+    low, LowAssignValue, LowCallArg, LowModule, LowRuntimeCallKind, LowStep, LowTerminator,
+    LowValue,
+};
 use std::collections::BTreeMap;
 
 pub fn lower_module(low: &LowModule) -> Module {
@@ -209,14 +212,47 @@ fn runtime_call_comment(kind: &LowRuntimeCallKind) -> String {
         LowRuntimeCallKind::ClosureInvoke {
             arg_count,
             thunk,
+            args,
             ..
         } => {
             if *thunk {
                 "thunk-call".to_string()
             } else {
-                format!("closure-call args={arg_count}")
+                format!(
+                    "closure-call args={arg_count} call_args=[{}]",
+                    args.iter()
+                        .map(render_low_call_arg)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
         }
+    }
+}
+
+fn render_low_call_arg(arg: &LowCallArg) -> String {
+    match arg {
+        LowCallArg::Positional(value) => render_low_value(value),
+        LowCallArg::Named { name, value } => format!("{name}: {}", render_low_value(value)),
+    }
+}
+
+fn render_low_value(value: &LowValue) -> String {
+    match value {
+        LowValue::Local(local, ty) => format!("_{}: {}", local, render_llvm_type(&lower_type(ty))),
+        LowValue::ConstInt(v) => v.to_string(),
+        LowValue::ConstString(s) => format!("{s:?}"),
+        LowValue::Unit => "()".to_string(),
+    }
+}
+
+fn render_llvm_type(ty: &Type) -> &'static str {
+    match ty {
+        Type::I64 => "i64",
+        Type::Double => "double",
+        Type::I1 => "i1",
+        Type::Ptr => "ptr",
+        Type::Void => "void",
     }
 }
 
@@ -317,6 +353,24 @@ mod tests {
         assert!(run.blocks[0].instructions.iter().any(|it| matches!(
             it,
             Instruction::CallExtern { symbol, .. } if symbol.starts_with("dx_rt_thunk_call")
+        )));
+    }
+
+    #[test]
+    fn preserves_closure_call_args_in_llvm_comments() {
+        let mir = typed_mir(
+            "fun run(x: Int) -> Int:\n    val f = (y: Int) => x + y\n    f(1)\n.\n",
+        );
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+        let run = llvm.functions.iter().find(|f| f.name == "run").expect("run");
+
+        assert!(run.blocks[0].instructions.iter().any(|it| matches!(
+            it,
+            Instruction::CallExtern { symbol, comment: Some(comment), .. }
+            if symbol.starts_with("dx_rt_closure_call")
+                && comment.contains("closure-call args=1")
+                && comment.contains("call_args=[1]")
         )));
     }
 

@@ -400,3 +400,88 @@ fn emit_mixed_string_globals_and_env_coexist() {
     assert!(ir.contains("@dx_rt_closure_create"), "closure create:\n{ir}");
     assert!(ir.contains("@dx_rt_py_call_function"), "py call:\n{ir}");
 }
+
+// ── non-thunk closure call ───────────────────────────────────────
+
+#[test]
+fn emit_closure_call_with_one_arg() {
+    // (y: Int) => x + y; g(1)
+    let ir = emit(
+        "fun f(x: Int) -> Int:\n    val g = (y: Int) => x + y\n    g(1)\n.\n",
+    );
+    assert!(ir.contains("@dx_rt_closure_create"), "closure create:\n{ir}");
+    assert!(ir.contains("closure_call_i64") || ir.contains("closure_call"),
+        "closure call symbol:\n{ir}");
+    assert!(ir.contains("ret i64"), "return type:\n{ir}");
+}
+
+#[test]
+fn emit_closure_call_plus_arithmetic() {
+    // Create a closure, call it, then add to the result
+    let ir = emit(
+        "fun f(x: Int) -> Int:\n    val g = (y: Int) => y\n    val r = g(x)\n    r + 1\n.\n",
+    );
+    assert!(ir.contains("@dx_rt_closure_create"), "closure create:\n{ir}");
+    assert!(ir.contains("add i64"), "arithmetic after closure call:\n{ir}");
+}
+
+#[test]
+fn emit_closure_call_deterministic() {
+    let src = "fun f(x: Int) -> Int:\n    val g = (y: Int) => x + y\n    g(1)\n.\n";
+    let ir1 = emit(src);
+    let ir2 = emit(src);
+    assert_eq!(ir1, ir2, "closure call emission deterministic");
+}
+
+// ── closure call + string return ─────────────────────────────────
+
+#[test]
+fn emit_closure_call_plus_string_return() {
+    let ir = emit(
+        "fun f(x: Int) -> Str:\n    val g = (y: Int) => y\n    g(x)\n    \"done\"\n.\n",
+    );
+    assert!(ir.contains("c\"done\\00\""), "string global:\n{ir}");
+    assert!(ir.contains("@dx_rt_closure_create"), "closure create:\n{ir}");
+}
+
+// ── validator cross-block use-def / dominance ────────────────────
+
+#[test]
+fn validator_rejects_cross_block_use_without_dominance() {
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::I64,
+            blocks: vec![
+                Block {
+                    label: "bb0".into(),
+                    instructions: vec![],
+                    // Uses %1 which is defined in bb1 — not dominated
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+                },
+                Block {
+                    label: "bb1".into(),
+                    instructions: vec![Instruction::Assign {
+                        result: "%1".into(),
+                        ty: Type::I64,
+                        value: Operand::ConstInt(42),
+                    }],
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+                },
+            ],
+        }],
+    };
+    let report = dx_llvm::validate_module(&module);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("register '%1' is not available at this use site")),
+        "validator should reject non-dominating cross-block use: {:?}",
+        report.diagnostics
+    );
+}

@@ -178,7 +178,7 @@ fn emit_instruction(
             symbol,
             ret,
             args,
-            ..
+            comment,
         } => {
             let args = args
                 .iter()
@@ -190,10 +190,18 @@ fn emit_instruction(
                 .join(", ");
             if let Some(result) = result {
                 let tmp = state.fresh();
-                writeln!(out, "  {tmp} = call {} @{}({})", render_type(ret), symbol, args).unwrap();
+                write!(out, "  {tmp} = call {} @{}({})", render_type(ret), symbol, args).unwrap();
+                if let Some(comment) = comment {
+                    write!(out, " ; {comment}").unwrap();
+                }
+                writeln!(out).unwrap();
                 writeln!(out, "  store {} {tmp}, ptr {}", render_type(ret), slot_name(result)).unwrap();
             } else {
-                writeln!(out, "  call {} @{}({})", render_type(ret), symbol, args).unwrap();
+                write!(out, "  call {} @{}({})", render_type(ret), symbol, args).unwrap();
+                if let Some(comment) = comment {
+                    write!(out, " ; {comment}").unwrap();
+                }
+                writeln!(out).unwrap();
             }
             Ok(())
         }
@@ -474,6 +482,18 @@ mod tests {
         assert!(ir.contains("declare ptr @dx_rt_py_call_dynamic(ptr, i64)"), "got:\n{ir}");
         assert!(ir.contains("call ptr @dx_rt_py_call_dynamic("), "got:\n{ir}");
         assert!(ir.contains("i64 0"), "expected dynamic arg count:\n{ir}");
+    }
+
+    #[test]
+    fn emits_runtime_call_comments_for_closure_call_path() {
+        let module = llvm_module(
+            "fun run(x: Int) -> Int:\n    val f = (y: Int) => x + y\n    f(1)\n.\n",
+        );
+        let ir = emit_module(&module).expect("emit");
+        assert!(ir.contains("@dx_rt_closure_call_i64"), "got:\n{ir}");
+        assert!(ir.contains("; stmt="), "expected runtime comment:\n{ir}");
+        assert!(ir.contains("closure-call args=1"), "expected closure call comment:\n{ir}");
+        assert!(ir.contains("call_args=[1]"), "expected preserved call args in comment:\n{ir}");
     }
 
     #[test]
