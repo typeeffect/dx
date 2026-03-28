@@ -73,6 +73,10 @@ The result after `dx-llvm` lowering must be only:
 - `Ret`
 - `Unreachable`
 
+The tag check helper used by this lowering is defined separately in:
+
+- `docs/DX_MATCH_RUNTIME_PLAN.md`
+
 If the current backend model needs a temporary internal helper structure inside
 `dx-llvm`, that is acceptable, but `dx-llvm-ir` must never see it.
 
@@ -82,6 +86,7 @@ Prefer the simplest lowering that is faithful to current semantics:
 
 - for the currently minimal subset, a cascade of comparisons and branches is fine
 - do not force a fake LLVM `switch` if the pattern model is not switch-like
+- keep runtime tag checks nominal-only
 
 In other words:
 

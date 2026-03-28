@@ -430,6 +430,8 @@ Work:
 - decide where `match` should be lowered:
   - before `dx-llvm-ir`
   - or directly inside it
+- fix the runtime contract of `dx_rt_match_tag` so match lowering does not
+  depend on an ambiguous helper
 
 Risks:
 
@@ -471,6 +473,10 @@ Exit criteria:
 Reference plan:
 
 - `docs/DX_LLVM_TOOLCHAIN_PLAN.md`
+
+Related backend plans:
+
+- `docs/DX_MATCH_RUNTIME_PLAN.md`
 
 ### Backend Milestone C: Execute Through a Real Runtime
 
