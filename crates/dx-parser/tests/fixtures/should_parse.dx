@@ -1,0 +1,494 @@
+## Fixture: should_parse.dx
+## Each section is a self-contained DX snippet that must parse today.
+## Sections are separated by "---" on its own line.
+## Extracted from examples/DX_LONG_EXAMPLES.md and spec/DX_V0_1_SPEC.md.
+
+--- nested_member_chains
+fun city(user: User) -> Str:
+    user'account'primary_address'city
+.
+
+--- long_member_chain
+fun final_url(cfg: Config) -> Str:
+    cfg'environments'prod'services'api'base_url
+.
+
+--- python_boundary
+from py pandas import read_csv
+
+fun load(path: Str) -> PyObj !py !throw:
+    read_csv(path)
+.
+
+--- python_numpy_wrapper
+from py numpy import array
+
+fun to_numpy(xs: Xs) -> PyObj !py !throw:
+    array(xs)
+.
+
+--- multi_import_names
+from py builtins import print, len, range
+
+--- lazy_expression
+fun f(path: Str) -> Unit:
+    lazy read_text(path)
+.
+
+--- lazy_block
+fun f() -> Unit:
+    lazy:
+        me'name
+    .
+.
+
+--- lazy_param_type_plain
+fun get_or_else(opt: Opt, fallback: lazy T) -> T:
+    fallback()
+.
+
+--- lazy_param_type_with_effects
+fun debug(enabled: Bool, msg: lazy Str !io) -> Unit !io:
+    if enabled:
+        print(msg())
+    .
+.
+
+--- lazy_param_type_multi_effect
+fun cache_or_compute(key: Str, compute: lazy Value !io !throw) -> Value !io !throw:
+    compute()
+.
+
+--- named_arguments
+fun f() -> Unit:
+    connect(host: "db", port: 5432)
+.
+
+--- mixed_positional_and_named
+fun f() -> Unit:
+    connect("db", port: 6432, ssl: 0)
+.
+
+--- single_param_lambda
+fun f(u: Users) -> Users:
+    u'filter(x => x'active)
+.
+
+--- multi_param_lambda
+fun f(u: Users) -> Users:
+    u'reduce((a, b) => a)
+.
+
+--- typed_lambda
+fun f() -> Unit:
+    (x: Int) => x
+.
+
+--- block_lambda
+fun f(lines: Lines) -> Lines:
+    lines'map(x =>:
+        val gross = x'price
+        gross
+    .)
+.
+
+--- if_else
+fun f(x: Bool) -> Str:
+    if x:
+        "yes"
+    else:
+        "no"
+    .
+.
+
+--- if_elif_else
+fun classify(flag: Bool, other: Bool) -> Str:
+    if flag:
+        "a"
+    elif other:
+        "b"
+    else:
+        "c"
+    .
+.
+
+--- nested_if
+fun f(a: Bool, b: Bool) -> Str:
+    if a:
+        if b:
+            "ab"
+        else:
+            "a"
+        .
+    else:
+        "none"
+    .
+.
+
+--- if_as_expression
+fun f(x: Bool) -> Str:
+    val result = if x:
+        "y"
+    else:
+        "n"
+    .
+    result
+.
+
+--- match_simple
+fun f(x: T) -> Int:
+    match x:
+        a:
+            1
+        _:
+            0
+    .
+.
+
+--- match_constructor_patterns
+fun unwrap(x: Result) -> Int:
+    match x:
+        Ok(v):
+            v
+        Err(_):
+            0
+    .
+.
+
+--- match_as_expression
+fun f(x: T) -> Int:
+    val r = match x:
+        a:
+            1
+        _:
+            0
+    .
+    r
+.
+
+--- val_var_rebind
+fun f() -> Unit:
+    val x = 1
+    var y = 2
+    y = 3
+.
+
+--- placeholder_member
+fun f() -> Unit:
+    _'email
+.
+
+--- placeholder_in_call
+fun f(u: Users) -> Ids:
+    u'map(_'id)
+.
+
+--- me_member_access
+fun f() -> Str:
+    me'first
+.
+
+--- it_pipeline
+fun f() -> Unit:
+    it'filter(x => x)
+.
+
+--- function_type_return
+fun sorter() -> (User, User) -> Bool:
+    me
+.
+
+--- zero_arg_function_type_return
+fun f() -> () -> T !io:
+    me
+.
+
+--- multiple_effects
+fun f(path: Str) -> PyObj !py !throw !io:
+    read(path)
+.
+
+--- no_return_type
+fun f():
+    42
+.
+
+--- multiple_functions
+fun f() -> Int:
+    1
+.
+
+fun g() -> Int:
+    2
+.
+
+--- empty_function
+fun f() -> Unit:
+    me
+.
+
+--- nested_calls
+fun f(x: X) -> Y:
+    outer(inner(x))
+.
+
+--- string_and_int_literals
+fun f() -> Unit:
+    val s = "hello"
+    val n = 42
+    print(s)
+.
+
+--- lazy_in_call_position
+fun f(p: Str) -> Unit:
+    debug(1, lazy read_text(p))
+.
+
+## ── examples from DX_LONG_EXAMPLES.md (operator-free fragments) ──
+
+--- ex10_cache_pattern
+## From example 10: zero-ary block closure (first function only, no operators)
+fun cache_or_compute(key: Str, compute: lazy Value !io) -> Value !io:
+    if cache'has(key):
+        cache'get(key)
+    else:
+        val value = compute()
+        cache'set(key, value)
+        value
+    .
+.
+
+--- ex23_deferred_fallback_simplified
+## From example 23: deferred fallback (without generic type parameters)
+fun get_or_else(opt: Opt, fallback: lazy T) -> T:
+    match opt:
+        Some(x):
+            x
+        None:
+            fallback()
+    .
+.
+
+fun load_name(user: User) -> Str:
+    get_or_else(user'nickname, lazy user'full_name())
+.
+
+--- ex3_lazy_thunk_param_if
+## From example 3: logging with lazy (simplified, no string concat)
+fun debug(enabled: Bool, msg: lazy Str !io) -> Unit !io:
+    if enabled:
+        print(msg())
+    .
+.
+
+fun run(path: Str) -> Unit !io:
+    debug(true, lazy read_text(path))
+.
+
+--- ex10_lazy_block_in_call
+## From example 10: lazy block as call argument
+fun load_user(id: Int) -> Value !io:
+    cache_or_compute("key", lazy:
+        read_user_from_disk(id)
+    .)
+.
+
+## ── composite patterns ───────────────────────────────────────────
+
+--- match_multi_statement_arms
+fun f(x: T) -> Int:
+    match x:
+        Ok(v):
+            val y = v
+            y
+        Err(_):
+            val z = 0
+            z
+    .
+.
+
+--- match_three_arms
+fun f(x: T) -> Int:
+    match x:
+        A(v):
+            1
+        B(v):
+            2
+        _:
+            0
+    .
+.
+
+--- match_inside_if
+fun f(flag: Bool, x: T) -> Int:
+    if flag:
+        match x:
+            a:
+                1
+            _:
+                0
+        .
+    else:
+        99
+    .
+.
+
+--- if_inside_match
+fun f(x: T, flag: Bool) -> Str:
+    match x:
+        a:
+            if flag:
+                "yes"
+            else:
+                "no"
+            .
+        _:
+            "default"
+    .
+.
+
+--- it_chain_multi_step
+## Two it-pipeline steps without operators
+fun f() -> Unit:
+    read(path)
+    it'filter(x => x'active)
+    it'map(x => x'email)
+.
+
+--- deep_nested_calls
+fun f(x: X) -> Y:
+    a(b(c(d(x))))
+.
+
+--- lambda_returning_member_chain
+fun f(u: U) -> U:
+    u'map(x => x'name'len())
+.
+
+--- multi_val_then_expr
+fun f(a: A, b: B) -> C:
+    val x = a'first
+    val y = b'second
+    val z = combine(x, y)
+    z
+.
+
+--- call_with_multiple_lazy_args
+fun f(a: A, b: B) -> Unit:
+    run(lazy a'compute(), lazy b'compute())
+.
+
+--- match_followed_by_stmts
+fun f(x: T) -> Int:
+    val base = match x:
+        a:
+            1
+        _:
+            0
+    .
+    transform(base)
+.
+
+--- if_else_both_multi_stmt
+fun f(x: Bool) -> Int:
+    if x:
+        val a = 1
+        val b = 2
+        combine(a, b)
+    else:
+        val c = 3
+        c
+    .
+.
+
+--- member_call_chain_long
+## Chain of member accesses and calls interleaved
+fun f(db: Db) -> R:
+    db'connection'pool'acquire()'execute("q")
+.
+
+--- lazy_param_py_effect
+## lazy param with !py effect
+fun f(action: lazy PyObj !py !throw) -> PyObj !py !throw:
+    action()
+.
+
+--- named_and_lazy_mixed_call
+## Named arguments and lazy positional args in the same call
+fun f(enabled: Bool, path: Str) -> Unit !io:
+    debug(enabled, msg: lazy read_text(path))
+.
+
+--- named_args_with_lazy_value
+## Named argument whose value is a lazy expression
+fun f(path: Str) -> Unit !io:
+    run(target: "prod", fallback: lazy load_default(path))
+.
+
+--- multiple_py_imports
+## Multiple from-py-import statements in the same module
+from py pandas import read_csv, DataFrame
+from py numpy import array, zeros
+from py builtins import print
+
+fun f(path: Str) -> PyObj !py !throw:
+    read_csv(path)
+.
+
+--- match_if_in_every_arm
+## If expression inside every arm of a match
+fun f(x: T, flag: Bool) -> Str:
+    match x:
+        Ok(v):
+            if flag:
+                "ok-yes"
+            else:
+                "ok-no"
+            .
+        Err(e):
+            if flag:
+                "err-yes"
+            else:
+                "err-no"
+            .
+        _:
+            "default"
+    .
+.
+
+--- match_with_member_access_scrutinee
+## Match on result of member access chain
+fun f(resp: Resp) -> Int:
+    match resp'status'code:
+        ok:
+            1
+        _:
+            0
+    .
+.
+
+--- if_with_match_in_both_branches
+## Match in both if and else branches
+fun f(flag: Bool, x: T, y: T) -> Int:
+    if flag:
+        match x:
+            a:
+                1
+            _:
+                0
+        .
+    else:
+        match y:
+            b:
+                2
+            _:
+                0
+        .
+    .
+.
+
+--- lazy_param_alongside_normal_params
+## Function with mix of normal and lazy params
+fun f(key: Str, compute: lazy Value !io, fallback: lazy Value) -> Value !io:
+    compute()
+.

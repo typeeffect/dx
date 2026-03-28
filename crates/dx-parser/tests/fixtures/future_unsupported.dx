@@ -1,0 +1,127 @@
+## Fixture: future_unsupported.dx
+## Each section uses approved syntax that the parser does NOT yet handle.
+## These are expected to fail at parsing today.
+## Sections are separated by "---" on its own line.
+
+--- binary_operators
+fun fact(n: Int) -> Int:
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+    .
+.
+
+--- generic_type_annotations
+fun ids(users: List[User]) -> List[Int]:
+    users'map(_'id)
+.
+
+--- type_declarations
+type Result[A, E]
+    = Ok(A)
+    | Err(E)
+.
+
+--- star_param_keyword_only
+fun connect(host: Str, *, port: Int) -> Conn !io:
+    host
+.
+
+--- default_param_values
+fun connect(host: Str, port: Int = 5432) -> Conn !io:
+    host
+.
+
+--- variadic_params
+fun sum(xs: Int...) -> Int:
+    xs
+.
+
+--- anonymous_fun_expression
+fun sorter() -> Fn:
+    fun(a: User, b: User) -> Bool:
+        a'age
+    .
+.
+
+--- trailing_closure_syntax
+fun f(orders: Orders) -> Orders:
+    orders'filter:
+        x => x'total
+    .
+.
+
+--- string_concatenation
+fun full_name() -> Str:
+    me'first + " " + me'last
+.
+
+--- query_syntax
+fun f(pg: Db) -> Q:
+    query:
+        from u in pg'users
+        where u'active
+        select u
+    .
+.
+
+--- scope_syntax
+fun f() -> Unit:
+    scope:
+        launch(lazy do_work())
+    .
+.
+
+--- field_assignment
+fun f(x: X) -> Unit:
+    x'name = "new"
+.
+
+--- from_py_inside_function_body
+fun f(path: Str) -> PyObj !py !throw:
+    from py pandas import read_csv
+    read_csv(path)
+.
+
+--- unit_literal
+## () as a unit value expression (needs parser support for empty parens)
+fun f(x: Bool) -> Unit:
+    if x:
+        print("hi")
+    else:
+        ()
+    .
+.
+
+--- arithmetic_in_if_condition
+## Binary operators in if conditions
+fun fact(n: Int) -> Int:
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+    .
+.
+
+--- operator_in_lambda_body
+## Operators inside lambda body
+fun f(xs: Xs) -> Xs:
+    xs'map(x => x + 1)
+.
+
+--- nested_conditionals_with_operators
+## Example 21: nested conditionals need comparison operators
+fun classify(x: Int) -> Str:
+    if x < 0:
+        "neg"
+    elif x == 0:
+        "zero"
+    else:
+        if x < 10:
+            "small"
+        else:
+            "big"
+        .
+    .
+.

@@ -78,6 +78,21 @@ pub enum Expr {
         arms: Vec<MatchArm>,
     },
     Placeholder,
+    BinaryOp {
+        op: BinOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Lt,
+    LtEq,
+    EqEq,
 }
 
 #[derive(Debug, Clone, PartialEq)]
