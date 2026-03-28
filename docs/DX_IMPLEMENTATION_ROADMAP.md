@@ -468,6 +468,10 @@ Exit criteria:
 
 - emitted `.ll` is suitable for real LLVM verification on the supported subset
 
+Reference plan:
+
+- `docs/DX_LLVM_TOOLCHAIN_PLAN.md`
+
 ### Backend Milestone C: Execute Through a Real Runtime
 
 Goal:

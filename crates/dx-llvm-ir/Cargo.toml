@@ -10,3 +10,7 @@ dx-hir = { path = "../dx-hir" }
 dx-llvm = { path = "../dx-llvm" }
 dx-mir = { path = "../dx-mir" }
 dx-parser = { path = "../dx-parser" }
+
+[[bin]]
+name = "dx-emit-llvm"
+path = "src/bin/dx-emit-llvm.rs"

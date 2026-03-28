@@ -83,3 +83,15 @@ instead of silently producing misleading IR.
 3. make runtime-hook operands concrete enough for real IR emission
 4. decide final closure env ABI
 5. add LLVM verification/tool integration on top of emitted IR
+
+## Follow-Up Plan
+
+The toolchain-integration phase is defined separately in:
+
+- `docs/DX_LLVM_TOOLCHAIN_PLAN.md`
+
+That phase should start only after the remaining semantic backend gaps are
+closed, especially:
+
+- ordinary closure-call ABI with real operands
+- `match` lowering before `dx-llvm-ir`
