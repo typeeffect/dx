@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/dx-parser", "crates/dx-hir", "crates/dx-mir", "crates/dx-runtime", "crates/dx-codegen"]
+members = ["crates/dx-parser", "crates/dx-hir", "crates/dx-mir", "crates/dx-runtime", "crates/dx-codegen", "crates/dx-llvm"]
 resolver = "2"
 
 [workspace.package]
