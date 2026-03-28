@@ -10,5 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dx-mir"
+version = "0.1.0"
+dependencies = [
+ "dx-hir",
+ "dx-parser",
+]
+
+[[package]]
 name = "dx-parser"
 version = "0.1.0"

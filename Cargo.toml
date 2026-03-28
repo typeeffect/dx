@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/dx-parser", "crates/dx-hir"]
+members = ["crates/dx-parser", "crates/dx-hir", "crates/dx-mir"]
 resolver = "2"
 
 [workspace.package]
