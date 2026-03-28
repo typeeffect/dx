@@ -1,6 +1,7 @@
 pub mod abi;
 pub mod closure;
 pub mod display;
+pub mod externs;
 pub mod lower;
 pub mod ops;
 pub mod py;
@@ -17,6 +18,10 @@ pub use closure::{
 pub use display::{
     render_closure_plan, render_combined_plan, render_lowered_calls, render_runtime_ops_plan,
     render_runtime_plan,
+};
+pub use externs::{
+    build_runtime_extern_plan, build_runtime_extern_plan_from_module, RuntimeExtern,
+    RuntimeExternAbiType, RuntimeExternPlan, RuntimeExternSignature,
 };
 pub use lower::{lower_python_runtime_calls, LoweredPyCall, PyDispatchTarget};
 pub use ops::{build_runtime_ops_plan, RuntimeHookKind, RuntimeOp, RuntimeOpKind, RuntimeOpsPlan};
