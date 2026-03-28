@@ -6,7 +6,7 @@ use dx_hir::Type;
 use dx_mir::mir;
 use dx_runtime::{
     build_runtime_extern_plan_from_module, build_runtime_ops_plan, build_throw_runtime_plan_from_module,
-    RuntimeOp, RuntimeOpKind,
+    RuntimeHookKind, RuntimeOp, RuntimeOpKind,
 };
 use std::collections::BTreeMap;
 
@@ -123,7 +123,7 @@ fn lower_runtime_op(op: &RuntimeOp) -> LowStep {
         statement: op.statement,
         destination: op.destination,
         symbol: op.runtime_symbol,
-        ret: op.result_type.as_ref().map(low_type_from_dx),
+        ret: Some(low_ret_from_runtime_hook(op.hook)),
         kind: match &op.kind {
             RuntimeOpKind::PyCall { arg_count, .. } => LowRuntimeCallKind::PyCall {
                 arg_count: *arg_count,
@@ -144,6 +144,13 @@ fn lower_runtime_op(op: &RuntimeOp) -> LowStep {
                 thunk: *thunk,
             },
         },
+    }
+}
+
+fn low_ret_from_runtime_hook(hook: RuntimeHookKind) -> LowType {
+    match hook {
+        RuntimeHookKind::Py(_) | RuntimeHookKind::Closure(_) => LowType::Ptr,
+        RuntimeHookKind::Throw(_) => LowType::Void,
     }
 }
 
@@ -248,6 +255,10 @@ mod tests {
             "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py !throw:\n    read_csv(path)\n.\n",
         );
         let low = lower_module(&module);
+        assert!(low
+            .externs
+            .iter()
+            .any(|ext| ext.symbol == "dx_rt_throw_check_pending"));
         let run = low.functions.iter().find(|f| f.name == "run").expect("run");
         let steps = &run.blocks[0].steps;
 

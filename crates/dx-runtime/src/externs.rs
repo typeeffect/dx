@@ -1,6 +1,7 @@
 use crate::abi::AbiType;
 use crate::closure::ClosureAbiType;
 use crate::ops::{build_runtime_ops_plan, RuntimeHookKind, RuntimeOpsPlan};
+use crate::throw::{build_throw_runtime_plan_from_module, ThrowRuntimeHook};
 use dx_mir::mir;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -10,6 +11,7 @@ pub enum RuntimeExternAbiType {
     ClosureHandle,
     EnvHandle,
     U32,
+    Void,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +45,17 @@ pub fn build_runtime_extern_plan(plan: &RuntimeOpsPlan) -> RuntimeExternPlan {
 
 pub fn build_runtime_extern_plan_from_module(module: &mir::Module) -> RuntimeExternPlan {
     let ops = build_runtime_ops_plan(module);
-    build_runtime_extern_plan(&ops)
+    let throw_plan = build_throw_runtime_plan_from_module(module);
+    let mut plan = build_runtime_extern_plan(&ops);
+    for hook in throw_plan.required_hooks {
+        let hook = RuntimeHookKind::Throw(hook);
+        if !plan.externs.iter().any(|ext| ext.hook == hook) {
+            plan.externs.push(runtime_extern_for_hook(hook));
+        }
+    }
+    plan.externs
+        .sort_by(|a, b| a.signature.symbol.cmp(b.signature.symbol));
+    plan
 }
 
 fn runtime_extern_for_hook(hook: RuntimeHookKind) -> RuntimeExtern {
@@ -61,6 +73,14 @@ fn runtime_extern_for_hook(hook: RuntimeHookKind) -> RuntimeExtern {
             (
                 sig.params.iter().copied().map(from_closure_abi).collect(),
                 from_closure_abi(sig.ret),
+                sig.symbol,
+            )
+        }
+        RuntimeHookKind::Throw(throw_hook) => {
+            let sig = throw_hook.signature();
+            (
+                sig.params.iter().copied().map(from_throw_abi).collect(),
+                from_throw_abi(sig.ret),
                 sig.symbol,
             )
         }
@@ -89,6 +109,39 @@ fn from_closure_abi(ty: ClosureAbiType) -> RuntimeExternAbiType {
         ClosureAbiType::ClosureHandle => RuntimeExternAbiType::ClosureHandle,
         ClosureAbiType::EnvHandle => RuntimeExternAbiType::EnvHandle,
         ClosureAbiType::U32 => RuntimeExternAbiType::U32,
+    }
+}
+
+fn from_throw_abi(ty: ThrowExternAbiType) -> RuntimeExternAbiType {
+    match ty {
+        ThrowExternAbiType::Void => RuntimeExternAbiType::Void,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThrowExternAbiType {
+    Void,
+}
+
+struct ThrowRuntimeHookSignature {
+    symbol: &'static str,
+    params: &'static [ThrowExternAbiType],
+    ret: ThrowExternAbiType,
+}
+
+trait ThrowRuntimeHookExt {
+    fn signature(self) -> ThrowRuntimeHookSignature;
+}
+
+impl ThrowRuntimeHookExt for ThrowRuntimeHook {
+    fn signature(self) -> ThrowRuntimeHookSignature {
+        match self {
+            ThrowRuntimeHook::CheckPending => ThrowRuntimeHookSignature {
+                symbol: "dx_rt_throw_check_pending",
+                params: &[],
+                ret: ThrowExternAbiType::Void,
+            },
+        }
     }
 }
 
@@ -121,6 +174,25 @@ mod tests {
         assert!(hooks.contains(&RuntimeHookKind::Py(RuntimeHook::PyCallFunction)));
         assert!(hooks.contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::Create)));
         assert!(hooks.contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::ThunkCall)));
+    }
+
+    #[test]
+    fn includes_throw_check_extern_when_module_has_throw_sites() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py !throw:\n    read_csv(path)\n.\n",
+        );
+        let plan = build_runtime_extern_plan_from_module(&module);
+
+        assert!(plan
+            .externs
+            .iter()
+            .any(|ext| ext.hook == RuntimeHookKind::Throw(ThrowRuntimeHook::CheckPending)));
+        assert!(plan
+            .externs
+            .iter()
+            .any(|ext| ext.signature.symbol == "dx_rt_throw_check_pending"
+                && ext.signature.params.is_empty()
+                && ext.signature.ret == RuntimeExternAbiType::Void));
     }
 
     #[test]

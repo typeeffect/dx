@@ -4,10 +4,6 @@
 //! - both layers produce consistent output without panicking
 //! - extern symbols, function names, and block labels align across layers
 //! - rendering is deterministic and readable
-//!
-//! Note: dx-llvm validation has known gaps (arg count mismatches in lowered
-//! runtime calls, missing throw-check externs). Tests verify rendering
-//! alignment, not validation perfection.
 
 use dx_codegen::render_low_module;
 use dx_llvm::render_module;
@@ -157,10 +153,25 @@ fn validate(src: &str) -> dx_llvm::ValidationReport {
 }
 
 #[test]
-fn validation_clean_for_pure_functions() {
-    // Functions with no runtime ops should validate cleanly
+fn validation_clean_for_straight_line_functions() {
+    // Straight-line functions with no control flow or runtime ops validate cleanly
     let sources = vec![
         "fun f(x: Int) -> Int:\n    x + 1\n.\n",
+        "fun f(x: Int, y: Int) -> Int:\n    x + y\n.\n",
+    ];
+    for src in sources {
+        let report = validate(src);
+        assert!(
+            report.diagnostics.is_empty(),
+            "validation should be clean for:\n{src}\ngot: {:?}",
+            report.diagnostics
+        );
+    }
+}
+
+#[test]
+fn validation_clean_for_control_flow() {
+    let sources = vec![
         "fun f(x: Bool) -> Int:\n    if x:\n        1\n    else:\n        2\n    .\n.\n",
         "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        _:\n            0\n    .\n.\n",
     ];
@@ -175,17 +186,19 @@ fn validation_clean_for_pure_functions() {
 }
 
 #[test]
-fn validation_runs_without_panic_for_runtime_ops() {
-    // Runtime op lowering has known validation gaps (arg count mismatches,
-    // missing throw-check externs). This test verifies the validator runs
-    // without panicking, not that diagnostics are empty.
+fn validation_clean_for_runtime_ops() {
     let sources = vec![
         "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py !throw:\n    read_csv(path)\n.\n",
         "fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n",
         "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n",
     ];
     for src in sources {
-        let _report = validate(src); // must not panic
+        let report = validate(src);
+        assert!(
+            report.diagnostics.is_empty(),
+            "validation should be clean for:\n{src}\ngot: {:?}",
+            report.diagnostics
+        );
     }
 }
 

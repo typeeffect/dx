@@ -434,14 +434,8 @@ impl Lowerer {
             },
         );
 
-        builder.push_statement(
-            fallback_bb,
-            mir::Statement::Assign {
-                place: dest,
-                value: mir::Rvalue::Use(mir::Operand::Const(mir::Constant::Unit)),
-            },
-        );
-        builder.set_terminator(fallback_bb, mir::Terminator::Goto(join_bb));
+        let _ = dest;
+        builder.set_terminator(fallback_bb, mir::Terminator::Unreachable);
 
         join_bb
     }

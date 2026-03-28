@@ -228,6 +228,7 @@ fn render_extern_abi_type(ty: &RuntimeExternAbiType) -> &'static str {
         RuntimeExternAbiType::ClosureHandle => "ClosureHandle",
         RuntimeExternAbiType::EnvHandle => "EnvHandle",
         RuntimeExternAbiType::U32 => "U32",
+        RuntimeExternAbiType::Void => "Void",
     }
 }
 

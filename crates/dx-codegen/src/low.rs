@@ -108,6 +108,7 @@ impl LowType {
             | RuntimeExternAbiType::ClosureHandle
             | RuntimeExternAbiType::EnvHandle => LowType::Ptr,
             RuntimeExternAbiType::U32 => LowType::I64,
+            RuntimeExternAbiType::Void => LowType::Void,
         }
     }
 }

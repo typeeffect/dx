@@ -85,7 +85,7 @@ fn lower_instruction(step: &LowStep) -> Instruction {
             result: destination.map(|local| format!("%{}", local)),
             symbol,
             ret: ret.as_ref().map(lower_type).unwrap_or(Type::Void),
-            args: runtime_call_args(kind),
+            args: runtime_call_args(symbol, kind),
             comment: Some(format!("stmt={statement}, {}", runtime_call_comment(kind))),
         },
         LowStep::ThrowCheck {
@@ -102,14 +102,29 @@ fn lower_instruction(step: &LowStep) -> Instruction {
     }
 }
 
-fn runtime_call_args(kind: &LowRuntimeCallKind) -> Vec<Operand> {
+fn runtime_call_args(symbol: &str, kind: &LowRuntimeCallKind) -> Vec<Operand> {
     match kind {
-        LowRuntimeCallKind::PyCall { arg_count } => vec![Operand::ConstInt(i64::from(*arg_count))],
+        LowRuntimeCallKind::PyCall { arg_count } => match symbol {
+            "dx_rt_py_call_function" => vec![
+                Operand::Register("%py_function".into(), Type::Ptr),
+                Operand::ConstInt(i64::from(*arg_count)),
+            ],
+            "dx_rt_py_call_method" => vec![
+                Operand::Register("%py_receiver".into(), Type::Ptr),
+                Operand::Register("%py_method".into(), Type::Ptr),
+                Operand::ConstInt(i64::from(*arg_count)),
+            ],
+            "dx_rt_py_call_dynamic" => vec![
+                Operand::Register("%py_callable".into(), Type::Ptr),
+                Operand::ConstInt(i64::from(*arg_count)),
+            ],
+            _ => vec![Operand::ConstInt(i64::from(*arg_count))],
+        },
         LowRuntimeCallKind::ClosureCreate {
-            capture_count,
+            capture_count: _,
             arity,
         } => vec![
-            Operand::ConstInt(*capture_count as i64),
+            Operand::Register("%closure_env".into(), Type::Ptr),
             Operand::ConstInt(*arity as i64),
         ],
         LowRuntimeCallKind::ClosureInvoke { arg_count, thunk } => {

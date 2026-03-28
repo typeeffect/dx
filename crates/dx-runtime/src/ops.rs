@@ -3,6 +3,7 @@ use crate::closure::{
     build_closure_runtime_plan, ClosureRuntimeHook, LoweredClosureCreation, LoweredClosureInvocation,
 };
 use crate::lower::{lower_python_runtime_calls, PyDispatchTarget};
+use crate::throw::ThrowRuntimeHook;
 use dx_hir::Type;
 use dx_mir::mir;
 
@@ -10,6 +11,7 @@ use dx_mir::mir;
 pub enum RuntimeHookKind {
     Py(RuntimeHook),
     Closure(ClosureRuntimeHook),
+    Throw(ThrowRuntimeHook),
 }
 
 impl RuntimeHookKind {
@@ -17,6 +19,7 @@ impl RuntimeHookKind {
         match self {
             RuntimeHookKind::Py(hook) => hook.symbol(),
             RuntimeHookKind::Closure(hook) => hook.symbol(),
+            RuntimeHookKind::Throw(hook) => hook.symbol(),
         }
     }
 }

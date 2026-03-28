@@ -183,9 +183,14 @@ mod tests {
             "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n",
         );
         let declare_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("declare")).collect();
-        let mut sorted = declare_lines.clone();
+        let symbols: Vec<&str> = declare_lines
+            .iter()
+            .filter_map(|line| line.split('@').nth(1))
+            .filter_map(|tail| tail.split('(').next())
+            .collect();
+        let mut sorted = symbols.clone();
         sorted.sort();
-        assert_eq!(declare_lines, sorted, "externs should be alphabetically sorted");
+        assert_eq!(symbols, sorted, "externs should be sorted by symbol");
     }
 
     #[test]
@@ -235,7 +240,7 @@ mod tests {
     #[test]
     fn snapshot_thunk_call_instruction() {
         let out = render("fun f(x: Int) -> Int:\n    val t = lazy x\n    t()\n.\n");
-        assert!(out.contains("call i64 @dx_rt_thunk_call("), "got:\n{out}");
+        assert!(out.contains("call ptr @dx_rt_thunk_call("), "got:\n{out}");
         assert!(out.contains("thunk-call"), "got:\n{out}");
     }
 

@@ -909,6 +909,8 @@ fn unify_branch_types<'a>(
     for ty in types.chain(extra.into_iter()) {
         match &acc {
             None => acc = Some(ty.clone()),
+            Some(current) if current.is_unknown() && !ty.is_unknown() => acc = Some(ty.clone()),
+            Some(current) if !current.is_unknown() && ty.is_unknown() => {}
             Some(current) if compatible_types(current, ty) => {}
             Some(_) => return Type::Unknown,
         }
