@@ -1,0 +1,12 @@
+[package]
+name = "dx-llvm-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dx-codegen = { path = "../dx-codegen" }
+dx-hir = { path = "../dx-hir" }
+dx-llvm = { path = "../dx-llvm" }
+dx-mir = { path = "../dx-mir" }
+dx-parser = { path = "../dx-parser" }

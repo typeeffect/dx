@@ -30,6 +30,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dx-llvm-ir"
+version = "0.1.0"
+dependencies = [
+ "dx-codegen",
+ "dx-hir",
+ "dx-llvm",
+ "dx-mir",
+ "dx-parser",
+]
+
+[[package]]
 name = "dx-mir"
 version = "0.1.0"
 dependencies = [
