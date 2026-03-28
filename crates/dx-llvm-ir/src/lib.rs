@@ -1,8 +1,15 @@
+pub mod exec;
 pub mod emit;
 pub mod link;
 pub mod pipeline;
 pub mod toolchain;
 
+pub use exec::{
+    build_executable_plan_from_ll,
+    build_executable_plan_from_source,
+    default_runtime_archive_path,
+    ExecutablePlan,
+};
 pub use emit::{emit_module, EmitError};
 pub use link::{build_link_command_plan, render_link_plan, LinkCommandPlan};
 pub use pipeline::{
