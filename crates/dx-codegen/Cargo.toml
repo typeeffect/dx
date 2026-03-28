@@ -1,0 +1,11 @@
+[package]
+name = "dx-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dx-hir = { path = "../dx-hir" }
+dx-mir = { path = "../dx-mir" }
+dx-parser = { path = "../dx-parser" }
+dx-runtime = { path = "../dx-runtime" }
