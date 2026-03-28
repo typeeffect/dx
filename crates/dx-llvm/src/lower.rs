@@ -1,7 +1,7 @@
 use crate::llvm::{
-    Block, ExternDecl, Function, Instruction, Module, Operand, Param, Type,
+    Block, ExternDecl, Function, Instruction, Module, Operand, Param, Terminator, Type,
 };
-use dx_codegen::{low, LowModule, LowRuntimeCallKind, LowStep};
+use dx_codegen::{low, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowValue};
 
 pub fn lower_module(low: &LowModule) -> Module {
     let externs = low
@@ -38,12 +38,39 @@ pub fn lower_module(low: &LowModule) -> Module {
                         .iter()
                         .map(lower_instruction)
                         .collect(),
+                    terminator: lower_terminator(&block.terminator),
                 })
                 .collect(),
         })
         .collect();
 
     Module { externs, functions }
+}
+
+fn lower_terminator(term: &LowTerminator) -> Terminator {
+    match term {
+        LowTerminator::Return(value) => Terminator::Ret(value.as_ref().map(lower_value)),
+        LowTerminator::Goto(target) => Terminator::Br(target.clone()),
+        LowTerminator::SwitchBool {
+            cond,
+            then_label,
+            else_label,
+        } => Terminator::CondBr {
+            cond: lower_value(cond),
+            then_label: then_label.clone(),
+            else_label: else_label.clone(),
+        },
+        LowTerminator::Match {
+            scrutinee,
+            arms,
+            fallback,
+        } => Terminator::MatchBr {
+            scrutinee: lower_value(scrutinee),
+            arms: arms.clone(),
+            fallback: fallback.clone(),
+        },
+        LowTerminator::Unreachable => Terminator::Unreachable,
+    }
 }
 
 fn lower_instruction(step: &LowStep) -> Instruction {
@@ -122,6 +149,14 @@ fn lower_type(ty: &low::LowType) -> Type {
     }
 }
 
+fn lower_value(value: &LowValue) -> Operand {
+    match value {
+        LowValue::Local(local, ty) => Operand::Register(format!("%{}", local), lower_type(ty)),
+        LowValue::ConstInt(v) => Operand::ConstInt(*v),
+        LowValue::ConstString(_) | LowValue::Unit => Operand::Register("%unit".into(), Type::Ptr),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +225,47 @@ mod tests {
         assert!(out.contains("define ptr @run"), "got:\n{out}");
         assert!(out.contains("call ptr @dx_rt_py_call_function"), "got:\n{out}");
         assert!(out.contains("call void @dx_rt_throw_check_pending()"), "got:\n{out}");
+    }
+
+    #[test]
+    fn lowers_return_terminator_to_llvm_like_ret() {
+        let mir = typed_mir("fun f(x: Int) -> Int:\n    x\n.\n");
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+        let f = llvm.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(matches!(
+            f.blocks[0].terminator,
+            Terminator::Ret(Some(Operand::Register(_, Type::I64)))
+        ));
+    }
+
+    #[test]
+    fn lowers_if_to_cond_br() {
+        let mir =
+            typed_mir("fun f(x: Bool) -> Int:\n    if x:\n        1\n    else:\n        2\n    .\n.\n");
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+        let f = llvm.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(f.blocks.iter().any(|bb| matches!(
+            bb.terminator,
+            Terminator::CondBr { .. }
+        )));
+    }
+
+    #[test]
+    fn lowers_match_to_match_br() {
+        let mir = typed_mir(
+            "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        Err(_):\n            0\n    .\n.\n",
+        );
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+        let f = llvm.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(f.blocks.iter().any(|bb| matches!(
+            bb.terminator,
+            Terminator::MatchBr { .. }
+        )));
     }
 }

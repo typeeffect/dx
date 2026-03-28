@@ -1,4 +1,6 @@
-use crate::low::{LowFunction, LowModule, LowRuntimeCallKind, LowStep, LowType};
+use crate::low::{
+    LowFunction, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowType, LowValue,
+};
 use std::fmt::Write;
 
 pub fn render_low_module(module: &LowModule) -> String {
@@ -52,9 +54,70 @@ fn render_low_function(function: &LowFunction, out: &mut String) {
         if block.steps.is_empty() {
             writeln!(out, "    (empty)").unwrap();
         }
+        write!(out, "    ").unwrap();
+        render_low_terminator(&block.terminator, out);
+        writeln!(out).unwrap();
     }
 
     writeln!(out, "}}").unwrap();
+}
+
+fn render_low_terminator(term: &LowTerminator, out: &mut String) {
+    match term {
+        LowTerminator::Return(value) => {
+            write!(out, "ret").unwrap();
+            if let Some(value) = value {
+                write!(out, " {}", render_low_value(value)).unwrap();
+            }
+        }
+        LowTerminator::Goto(target) => {
+            write!(out, "br {target}").unwrap();
+        }
+        LowTerminator::SwitchBool {
+            cond,
+            then_label,
+            else_label,
+        } => {
+            write!(
+                out,
+                "condbr {}, {}, {}",
+                render_low_value(cond),
+                then_label,
+                else_label
+            )
+            .unwrap();
+        }
+        LowTerminator::Match {
+            scrutinee,
+            arms,
+            fallback,
+        } => {
+            write!(out, "match {}", render_low_value(scrutinee)).unwrap();
+            if !arms.is_empty() {
+                write!(out, " [").unwrap();
+                for (i, (pat, target)) in arms.iter().enumerate() {
+                    if i > 0 {
+                        write!(out, ", ").unwrap();
+                    }
+                    write!(out, "{pat}: {target}").unwrap();
+                }
+                write!(out, "]").unwrap();
+            }
+            write!(out, " else {fallback}").unwrap();
+        }
+        LowTerminator::Unreachable => {
+            write!(out, "unreachable").unwrap();
+        }
+    }
+}
+
+fn render_low_value(value: &LowValue) -> String {
+    match value {
+        LowValue::Local(local, ty) => format!("_{}: {}", local, low_type_str(ty)),
+        LowValue::ConstInt(v) => format!("{v}"),
+        LowValue::ConstString(s) => format!("{s:?}"),
+        LowValue::Unit => "()".to_string(),
+    }
 }
 
 fn render_low_step(step: &LowStep, out: &mut String) {

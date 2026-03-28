@@ -29,6 +29,7 @@ pub struct Param {
 pub struct Block {
     pub label: String,
     pub instructions: Vec<Instruction>,
+    pub terminator: Terminator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +41,23 @@ pub enum Instruction {
         args: Vec<Operand>,
         comment: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Terminator {
+    Ret(Option<Operand>),
+    Br(String),
+    CondBr {
+        cond: Operand,
+        then_label: String,
+        else_label: String,
+    },
+    MatchBr {
+        scrutinee: Operand,
+        arms: Vec<(String, String)>,
+        fallback: String,
+    },
+    Unreachable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -32,6 +32,7 @@ pub struct LowParam {
 pub struct LowBlock {
     pub label: String,
     pub steps: Vec<LowStep>,
+    pub terminator: LowTerminator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +49,31 @@ pub enum LowStep {
         symbol: &'static str,
         boundary: ThrowBoundaryKind,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LowValue {
+    Local(mir::LocalId, LowType),
+    ConstInt(i64),
+    ConstString(String),
+    Unit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LowTerminator {
+    Return(Option<LowValue>),
+    Goto(String),
+    SwitchBool {
+        cond: LowValue,
+        then_label: String,
+        else_label: String,
+    },
+    Match {
+        scrutinee: LowValue,
+        arms: Vec<(String, String)>,
+        fallback: String,
+    },
+    Unreachable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

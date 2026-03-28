@@ -1,5 +1,6 @@
 use crate::low::{
-    LowBlock, LowExtern, LowFunction, LowModule, LowParam, LowRuntimeCallKind, LowStep, LowType,
+    LowBlock, LowExtern, LowFunction, LowModule, LowParam, LowRuntimeCallKind, LowStep,
+    LowTerminator, LowType, LowValue,
 };
 use dx_hir::Type;
 use dx_mir::mir;
@@ -82,7 +83,7 @@ fn lower_function(
         .blocks
         .iter()
         .enumerate()
-        .map(|(block_id, _)| {
+        .map(|(block_id, block)| {
             let mut steps = Vec::new();
             for ((name, bb, stmt), ops) in ops_by_pos.iter() {
                 if name != &function.name || *bb != block_id {
@@ -104,6 +105,7 @@ fn lower_function(
             LowBlock {
                 label: format!("bb{block_id}"),
                 steps,
+                terminator: lower_terminator(&block.terminator, &function.locals),
             }
         })
         .collect();
@@ -153,6 +155,63 @@ fn low_type_from_dx(ty: &Type) -> LowType {
         Type::Unit => LowType::Void,
         Type::Str | Type::PyObj | Type::Named(_) | Type::Function { .. } | Type::Unknown => {
             LowType::Ptr
+        }
+    }
+}
+
+fn lower_terminator(terminator: &mir::Terminator, locals: &[mir::Local]) -> LowTerminator {
+    match terminator {
+        mir::Terminator::Return(value) => {
+            LowTerminator::Return(value.as_ref().map(|it| lower_operand(it, locals)))
+        }
+        mir::Terminator::Goto(target) => LowTerminator::Goto(format!("bb{target}")),
+        mir::Terminator::SwitchBool {
+            cond,
+            then_bb,
+            else_bb,
+        } => LowTerminator::SwitchBool {
+            cond: lower_operand(cond, locals),
+            then_label: format!("bb{then_bb}"),
+            else_label: format!("bb{else_bb}"),
+        },
+        mir::Terminator::Match {
+            scrutinee,
+            arms,
+            fallback,
+        } => LowTerminator::Match {
+            scrutinee: lower_operand(scrutinee, locals),
+            arms: arms
+                .iter()
+                .map(|(pattern, target)| (render_pattern(pattern), format!("bb{target}")))
+                .collect(),
+            fallback: format!("bb{fallback}"),
+        },
+        mir::Terminator::Unreachable => LowTerminator::Unreachable,
+    }
+}
+
+fn lower_operand(operand: &mir::Operand, locals: &[mir::Local]) -> LowValue {
+    match operand {
+        mir::Operand::Copy(local) => LowValue::Local(*local, low_type_from_dx(&locals[*local].ty)),
+        mir::Operand::Const(constant) => match constant {
+            mir::Constant::Int(value) => LowValue::ConstInt(value.parse().unwrap_or(0)),
+            mir::Constant::String(value) => LowValue::ConstString(value.clone()),
+            mir::Constant::Unit => LowValue::Unit,
+        },
+    }
+}
+
+fn render_pattern(pattern: &dx_hir::Pattern) -> String {
+    match pattern {
+        dx_hir::Pattern::Name(name) => name.clone(),
+        dx_hir::Pattern::Wildcard => "_".to_string(),
+        dx_hir::Pattern::Constructor { name, args } => {
+            if args.is_empty() {
+                name.clone()
+            } else {
+                let args = args.iter().map(render_pattern).collect::<Vec<_>>().join(", ");
+                format!("{name}({args})")
+            }
         }
     }
 }
@@ -233,5 +292,44 @@ mod tests {
         assert_eq!(f.params[0].ty, LowType::I64);
         assert_eq!(f.params[1].ty, LowType::I1);
         assert_eq!(f.ret, LowType::I64);
+    }
+
+    #[test]
+    fn lowers_return_terminator() {
+        let module = typed_mir("fun f(x: Int) -> Int:\n    x\n.\n");
+        let low = lower_module(&module);
+        let f = low.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(matches!(
+            f.blocks[0].terminator,
+            LowTerminator::Return(Some(LowValue::Local(_, LowType::I64)))
+        ));
+    }
+
+    #[test]
+    fn lowers_if_to_switch_terminator() {
+        let module =
+            typed_mir("fun f(x: Bool) -> Int:\n    if x:\n        1\n    else:\n        2\n    .\n.\n");
+        let low = lower_module(&module);
+        let f = low.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(f.blocks.iter().any(|bb| matches!(
+            bb.terminator,
+            LowTerminator::SwitchBool { .. }
+        )));
+    }
+
+    #[test]
+    fn lowers_match_to_match_terminator() {
+        let module = typed_mir(
+            "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        Err(_):\n            0\n    .\n.\n",
+        );
+        let low = lower_module(&module);
+        let f = low.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(f.blocks.iter().any(|bb| matches!(
+            bb.terminator,
+            LowTerminator::Match { .. }
+        )));
     }
 }
