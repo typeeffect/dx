@@ -597,3 +597,71 @@ fn rejects_closure_operand_type_mismatch_in_call() {
     let report = validate_module(&module);
     assert!(has_diag(&report, "arg type mismatch"), "{:?}", report.diagnostics);
 }
+
+// ── PackEnv rendering and ordering ──────────────────────────────
+
+#[test]
+fn pack_env_renders_single_capture() {
+    let (_, rendered, _report) = pipeline("fun f(x: Int) -> lazy Int:\n    lazy x\n.\n");
+    assert!(rendered.contains("pack_env ["), "pack_env missing:\n{rendered}");
+    // Within the function body (after "define"), pack_env appears before the call to closure_create
+    let body_start = rendered.find("define ").unwrap_or(0);
+    let body = &rendered[body_start..];
+    if let (Some(pack_pos), Some(create_pos)) = (body.find("pack_env"), body.find("call ptr @dx_rt_closure_create")) {
+        assert!(pack_pos < create_pos, "pack_env should precede closure_create call:\n{rendered}");
+    }
+}
+
+#[test]
+fn pack_env_renders_two_captures_stably() {
+    let (_, r1, _) = pipeline("fun f(x: Int, y: Int) -> lazy Int:\n    lazy x + y\n.\n");
+    assert!(r1.contains("pack_env ["), "pack_env missing:\n{r1}");
+    let (_, r2, _) = pipeline("fun f(x: Int, y: Int) -> lazy Int:\n    lazy x + y\n.\n");
+    assert_eq!(r1, r2, "pack_env ordering must be deterministic");
+}
+
+#[test]
+fn pack_env_before_closure_create_in_mixed_module() {
+    let (_, rendered, _report) = pipeline(
+        "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py !throw:\n    val df = read_csv(path)\n    val t = lazy df\n    t()\n.\n",
+    );
+    let body_start = rendered.find("define ").unwrap_or(0);
+    let body = &rendered[body_start..];
+    if let (Some(pack_pos), Some(create_pos)) = (body.find("pack_env"), body.find("call ptr @dx_rt_closure_create")) {
+        assert!(pack_pos < create_pos, "pack_env before closure_create call:\n{rendered}");
+    }
+    assert!(rendered.contains("@dx_rt_py_call_function"), "py call:\n{rendered}");
+    assert!(rendered.contains("@dx_rt_throw_check_pending"), "throw-check:\n{rendered}");
+}
+
+#[test]
+fn validator_accepts_module_with_pack_env() {
+    let module = module_with(vec![Function {
+        name: "f".into(),
+        params: vec![Param { name: "%0".into(), ty: Type::I64 }],
+        ret: Type::Ptr,
+        blocks: vec![Block {
+            label: "bb0".into(),
+            instructions: vec![Instruction::PackEnv {
+                result: "%env".into(),
+                captures: vec![Operand::Register("%0".into(), Type::I64)],
+            }],
+            terminator: Terminator::Ret(Some(Operand::Register("%env".into(), Type::Ptr))),
+        }],
+    }]);
+    let report = validate_module(&module);
+    assert!(report.is_ok(), "PackEnv should not cause validation failure: {:?}", report.diagnostics);
+}
+
+#[test]
+fn multiple_closure_creates_render_deterministically() {
+    let (_, r1, _) = pipeline(
+        "fun f(x: Int, y: Int) -> lazy Int:\n    val a = lazy x\n    val b = lazy y\n    a\n.\n",
+    );
+    let (_, r2, _) = pipeline(
+        "fun f(x: Int, y: Int) -> lazy Int:\n    val a = lazy x\n    val b = lazy y\n    a\n.\n",
+    );
+    assert_eq!(r1, r2, "multiple closure creates must render identically");
+    let create_count = r1.matches("@dx_rt_closure_create").count();
+    assert!(create_count >= 2, "expected >=2 closure creates, got {create_count}:\n{r1}");
+}
