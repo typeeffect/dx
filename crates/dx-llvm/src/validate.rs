@@ -66,10 +66,52 @@ fn validate_function(
         }
     }
 
+    let mut defined_registers = BTreeSet::new();
+    for param in &function.params {
+        defined_registers.insert(param.name.clone());
+    }
+
     for block in &function.blocks {
         for instr in &block.instructions {
             match instr {
-                Instruction::PackEnv { result: _, captures: _ } => {}
+                Instruction::PackEnv { result, .. } => {
+                    if !defined_registers.insert(result.clone()) {
+                        diagnostics.push(ValidationDiagnostic {
+                            function: Some(function.name.clone()),
+                            block: Some(block.label.clone()),
+                            message: format!("duplicate register definition '{}'", result),
+                        });
+                    }
+                }
+                Instruction::CallExtern { result, .. } => {
+                    if let Some(result) = result {
+                        if !defined_registers.insert(result.clone()) {
+                            diagnostics.push(ValidationDiagnostic {
+                                function: Some(function.name.clone()),
+                                block: Some(block.label.clone()),
+                                message: format!("duplicate register definition '{}'", result),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for block in &function.blocks {
+        for instr in &block.instructions {
+            match instr {
+                Instruction::PackEnv { result: _, captures } => {
+                    for capture in captures {
+                        validate_operand_defined(
+                            capture,
+                            &defined_registers,
+                            function,
+                            block,
+                            diagnostics,
+                        );
+                    }
+                }
                 Instruction::CallExtern {
                     result: _,
                     symbol,
@@ -110,6 +152,13 @@ fn validate_function(
                         });
                     } else {
                         for (arg, expected) in args.iter().zip(ext.params.iter()) {
+                            validate_operand_defined(
+                                arg,
+                                &defined_registers,
+                                function,
+                                block,
+                                diagnostics,
+                            );
                             if operand_type(arg) != *expected {
                                 diagnostics.push(ValidationDiagnostic {
                                     function: Some(function.name.clone()),
@@ -128,33 +177,70 @@ fn validate_function(
             }
         }
 
-        validate_terminator(function, block, &block_labels, diagnostics);
+        validate_terminator(function, block, &block_labels, &defined_registers, diagnostics);
     }
+}
+
+fn validate_operand_defined(
+    operand: &Operand,
+    defined_registers: &BTreeSet<String>,
+    function: &Function,
+    block: &crate::llvm::Block,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    if let Operand::Register(name, _) = operand {
+        if !defined_registers.contains(name) && !is_implicitly_available_register(name) {
+            diagnostics.push(ValidationDiagnostic {
+                function: Some(function.name.clone()),
+                block: Some(block.label.clone()),
+                message: format!("use of undefined register '{}'", name),
+            });
+        }
+    }
+}
+
+fn is_implicitly_available_register(name: &str) -> bool {
+    if name == "%unit" {
+        return true;
+    }
+    if name.starts_with("%py_") {
+        return true;
+    }
+    name.strip_prefix('%')
+        .map(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or(false)
 }
 
 fn validate_terminator(
     function: &Function,
     block: &crate::llvm::Block,
     block_labels: &BTreeSet<String>,
+    defined_registers: &BTreeSet<String>,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     match &block.terminator {
         Terminator::Ret(value) => match value {
-            Some(value) if operand_type(value) != function.ret => diagnostics.push(ValidationDiagnostic {
-                function: Some(function.name.clone()),
-                block: Some(block.label.clone()),
-                message: format!(
-                    "return type mismatch: got {:?}, function returns {:?}",
-                    operand_type(value),
-                    function.ret
-                ),
-            }),
+            Some(value) if operand_type(value) != function.ret => {
+                validate_operand_defined(value, defined_registers, function, block, diagnostics);
+                diagnostics.push(ValidationDiagnostic {
+                    function: Some(function.name.clone()),
+                    block: Some(block.label.clone()),
+                    message: format!(
+                        "return type mismatch: got {:?}, function returns {:?}",
+                        operand_type(value),
+                        function.ret
+                    ),
+                })
+            }
             None if function.ret != Type::Void => diagnostics.push(ValidationDiagnostic {
                 function: Some(function.name.clone()),
                 block: Some(block.label.clone()),
                 message: format!("missing return value for non-void function returning {:?}", function.ret),
             }),
-            Some(_) | None => {}
+            Some(value) => {
+                validate_operand_defined(value, defined_registers, function, block, diagnostics);
+            }
+            None => {}
         },
         Terminator::Br(target) => {
             if !block_labels.contains(target) {
@@ -170,6 +256,7 @@ fn validate_terminator(
             then_label,
             else_label,
         } => {
+            validate_operand_defined(cond, defined_registers, function, block, diagnostics);
             if operand_type(cond) != Type::I1 {
                 diagnostics.push(ValidationDiagnostic {
                     function: Some(function.name.clone()),
@@ -193,10 +280,11 @@ fn validate_terminator(
             }
         }
         Terminator::MatchBr {
-            scrutinee: _,
+            scrutinee,
             arms,
             fallback,
         } => {
+            validate_operand_defined(scrutinee, defined_registers, function, block, diagnostics);
             for (_, target) in arms {
                 if !block_labels.contains(target) {
                     diagnostics.push(ValidationDiagnostic {
@@ -303,6 +391,70 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("return type mismatch")));
+    }
+
+    #[test]
+    fn rejects_use_of_undefined_register() {
+        let mut module = valid_module();
+        module.functions[0].blocks[0].instructions = vec![Instruction::CallExtern {
+            result: Some("%1".into()),
+            symbol: "dx_rt_py_call_function",
+            ret: Type::Ptr,
+            args: vec![
+                Operand::Register("%missing".into(), Type::Ptr),
+                Operand::ConstInt(1),
+            ],
+            comment: None,
+        }];
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("use of undefined register '%missing'")));
+    }
+
+    #[test]
+    fn rejects_duplicate_register_definition() {
+        let module = Module {
+            externs: vec![ExternDecl {
+                symbol: "dx_rt_py_call_function",
+                params: vec![Type::Ptr, Type::I64],
+                ret: Type::Ptr,
+            }],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![Param {
+                    name: "%0".into(),
+                    ty: Type::Ptr,
+                }],
+                ret: Type::Ptr,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![
+                        Instruction::PackEnv {
+                            result: "%1".into(),
+                            captures: vec![Operand::Register("%0".into(), Type::Ptr)],
+                        },
+                        Instruction::CallExtern {
+                            result: Some("%1".into()),
+                            symbol: "dx_rt_py_call_function",
+                            ret: Type::Ptr,
+                            args: vec![
+                                Operand::Register("%0".into(), Type::Ptr),
+                                Operand::ConstInt(1),
+                            ],
+                            comment: None,
+                        },
+                    ],
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::Ptr))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("duplicate register definition '%1'")));
     }
 
     #[test]
