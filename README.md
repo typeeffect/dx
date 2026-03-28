@@ -15,6 +15,7 @@ Current focus:
 - `docs/`
   - language vision
   - design critique
+  - Python interop architecture
 - `spec/`
   - v0.1 core spec
 - `examples/`
@@ -46,3 +47,7 @@ Implement the v0.1 core described in:
 and validate it against:
 
 - `examples/DX_LONG_EXAMPLES.md`
+
+See also:
+
+- `docs/PY_INTEROP_ARCHITECTURE.md`
