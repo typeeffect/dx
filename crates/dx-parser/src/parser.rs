@@ -1,5 +1,8 @@
-use crate::ast::{Item, Module};
-use crate::token::{Token, TokenKind};
+use crate::ast::{
+    Arg, Expr, FunctionDecl, ImportPyDecl, Item, LambdaBody, LambdaParam, Module, Param, Stmt,
+    TypeExpr,
+};
+use crate::token::{Keyword, Token, TokenKind};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -12,6 +15,14 @@ pub struct ParseError {
     pub message: String,
 }
 
+impl ParseError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, pos: 0 }
@@ -19,55 +30,432 @@ impl Parser {
 
     pub fn parse_module(&mut self) -> Result<Module, ParseError> {
         let mut items = Vec::new();
+        self.skip_newlines();
         while !self.at_eof() {
-            self.skip_newlines();
-            if self.at_eof() {
-                break;
-            }
-            if self.is_fun_decl_start() {
-                self.consume_until_top_level_terminator();
-                items.push(Item::Statement(crate::ast::Stmt::Expr(crate::ast::Expr::Name(
-                    "<fun-decl-placeholder>".to_string(),
-                ))));
-            } else {
-                self.consume_until_newline_or_eof();
-            }
+            items.push(self.parse_item()?);
             self.skip_newlines();
         }
         Ok(Module { items })
     }
 
-    fn is_fun_decl_start(&self) -> bool {
-        matches!(self.peek_kind(), Some(TokenKind::Keyword(crate::token::Keyword::Fun)))
+    fn parse_item(&mut self) -> Result<Item, ParseError> {
+        self.skip_newlines();
+        if self.at_keyword(Keyword::From) {
+            return Ok(Item::ImportPy(self.parse_import_py()?));
+        }
+        if self.at_keyword(Keyword::Fun) {
+            return Ok(Item::Function(self.parse_function_decl()?));
+        }
+        Ok(Item::Statement(self.parse_stmt()?))
     }
 
-    fn consume_until_top_level_terminator(&mut self) {
-        while !self.at_eof() {
-            if matches!(self.peek_kind(), Some(TokenKind::Dot)) {
-                self.pos += 1;
+    fn parse_import_py(&mut self) -> Result<ImportPyDecl, ParseError> {
+        self.expect_keyword(Keyword::From)?;
+        self.expect_keyword(Keyword::Py)?;
+        let module = self.expect_identifier()?;
+        self.expect_keyword(Keyword::Import)?;
+        let mut names = vec![self.expect_identifier()?];
+        while self.at(TokenKind::Comma) {
+            self.bump();
+            names.push(self.expect_identifier()?);
+        }
+        self.consume_optional_newline();
+        Ok(ImportPyDecl { module, names })
+    }
+
+    fn parse_function_decl(&mut self) -> Result<FunctionDecl, ParseError> {
+        self.expect_keyword(Keyword::Fun)?;
+        let name = self.expect_identifier()?;
+        self.expect(TokenKind::LParen)?;
+        let params = self.parse_param_list()?;
+        self.expect(TokenKind::RParen)?;
+        let return_type = if self.at(TokenKind::Arrow) {
+            self.bump();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+        let effects = self.parse_effects()?;
+        self.expect(TokenKind::Colon)?;
+        let body = self.parse_block_until_dot()?;
+        Ok(FunctionDecl {
+            name,
+            params,
+            return_type,
+            effects,
+            body,
+        })
+    }
+
+    fn parse_param_list(&mut self) -> Result<Vec<Param>, ParseError> {
+        let mut params = Vec::new();
+        self.skip_newlines();
+        if self.at(TokenKind::RParen) {
+            return Ok(params);
+        }
+        loop {
+            let name = self.expect_identifier()?;
+            self.expect(TokenKind::Colon)?;
+            let ty = self.parse_type_expr()?;
+            params.push(Param { name, ty });
+            if !self.at(TokenKind::Comma) {
                 break;
             }
-            self.pos += 1;
+            self.bump();
+        }
+        Ok(params)
+    }
+
+    fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
+        if self.at(TokenKind::LParen) {
+            self.bump();
+            let mut params = Vec::new();
+            if !self.at(TokenKind::RParen) {
+                loop {
+                    params.push(self.parse_type_expr()?);
+                    if !self.at(TokenKind::Comma) {
+                        break;
+                    }
+                    self.bump();
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+            self.expect(TokenKind::Arrow)?;
+            let ret = Box::new(self.parse_type_expr()?);
+            let effects = self.parse_effects()?;
+            return Ok(TypeExpr::Function {
+                params,
+                ret,
+                effects,
+            });
+        }
+        Ok(TypeExpr::Name(self.expect_identifier()?))
+    }
+
+    fn parse_effects(&mut self) -> Result<Vec<String>, ParseError> {
+        let mut effects = Vec::new();
+        while self.at(TokenKind::Bang) {
+            self.bump();
+            effects.push(self.expect_effect_name()?);
+        }
+        Ok(effects)
+    }
+
+    fn parse_block_until_dot(&mut self) -> Result<Vec<Stmt>, ParseError> {
+        let mut body = Vec::new();
+        self.skip_newlines();
+        while !self.at(TokenKind::Dot) {
+            if self.at_eof() {
+                return Err(ParseError::new("unterminated block"));
+            }
+            body.push(self.parse_stmt()?);
+            self.skip_newlines();
+        }
+        self.expect(TokenKind::Dot)?;
+        self.consume_optional_newline();
+        Ok(body)
+    }
+
+    fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
+        self.skip_newlines();
+        if self.at_keyword(Keyword::Val) {
+            self.bump();
+            let name = self.expect_identifier()?;
+            self.expect(TokenKind::Equal)?;
+            let value = self.parse_expr()?;
+            self.consume_optional_newline();
+            return Ok(Stmt::ValBind { name, value });
+        }
+        if self.at_keyword(Keyword::Var) {
+            self.bump();
+            let name = self.expect_identifier()?;
+            self.expect(TokenKind::Equal)?;
+            let value = self.parse_expr()?;
+            self.consume_optional_newline();
+            return Ok(Stmt::VarBind { name, value });
+        }
+
+        let expr = self.parse_expr()?;
+        if self.at(TokenKind::Equal) {
+            self.bump();
+            let value = self.parse_expr()?;
+            self.consume_optional_newline();
+            if let Expr::Name(name) = expr {
+                return Ok(Stmt::Rebind { name, value });
+            }
+            return Err(ParseError::new("left-hand side of assignment must be a name"));
+        }
+        self.consume_optional_newline();
+        Ok(Stmt::Expr(expr))
+    }
+
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.parse_lambda_or_postfix()
+    }
+
+    fn parse_lambda_or_postfix(&mut self) -> Result<Expr, ParseError> {
+        if self.at_keyword(Keyword::Lazy) {
+            return self.parse_lazy_expr();
+        }
+
+        if let Some(expr) = self.try_parse_lambda()? {
+            return Ok(expr);
+        }
+
+        self.parse_postfix_expr()
+    }
+
+    fn try_parse_lambda(&mut self) -> Result<Option<Expr>, ParseError> {
+        let checkpoint = self.pos;
+
+        if let Some(single) = self.try_parse_single_param_lambda()? {
+            return Ok(Some(single));
+        }
+
+        self.pos = checkpoint;
+        if !self.at(TokenKind::LParen) {
+            return Ok(None);
+        }
+        self.bump();
+        let mut params = Vec::new();
+        if !self.at(TokenKind::RParen) {
+            loop {
+                let name = self.expect_identifier()?;
+                let ty = if self.at(TokenKind::Colon) {
+                    self.bump();
+                    Some(self.parse_type_expr()?)
+                } else {
+                    None
+                };
+                params.push(LambdaParam { name, ty });
+                if !self.at(TokenKind::Comma) {
+                    break;
+                }
+                self.bump();
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        if !self.at(TokenKind::FatArrow) {
+            self.pos = checkpoint;
+            return Ok(None);
+        }
+        self.bump();
+        let body = self.parse_lambda_body()?;
+        Ok(Some(Expr::Lambda { params, body }))
+    }
+
+    fn try_parse_single_param_lambda(&mut self) -> Result<Option<Expr>, ParseError> {
+        let checkpoint = self.pos;
+        let name = match self.peek_kind() {
+            Some(TokenKind::Identifier(name)) => name.clone(),
+            _ => return Ok(None),
+        };
+        self.bump();
+        if !self.at(TokenKind::FatArrow) {
+            self.pos = checkpoint;
+            return Ok(None);
+        }
+        self.bump();
+        let body = self.parse_lambda_body()?;
+        Ok(Some(Expr::Lambda {
+            params: vec![LambdaParam { name, ty: None }],
+            body,
+        }))
+    }
+
+    fn parse_lambda_body(&mut self) -> Result<LambdaBody, ParseError> {
+        if self.at(TokenKind::Colon) {
+            self.bump();
+            let block = self.parse_block_until_dot()?;
+            Ok(LambdaBody::Block(block))
+        } else {
+            Ok(LambdaBody::Expr(Box::new(self.parse_expr()?)))
         }
     }
 
-    fn consume_until_newline_or_eof(&mut self) {
-        while !self.at_eof() {
-            match self.peek_kind() {
-                Some(TokenKind::Newline) | Some(TokenKind::Eof) => break,
-                _ => self.pos += 1,
+    fn parse_lazy_expr(&mut self) -> Result<Expr, ParseError> {
+        self.expect_keyword(Keyword::Lazy)?;
+        let body = if self.at(TokenKind::Colon) {
+            self.bump();
+            LambdaBody::Block(self.parse_block_until_dot()?)
+        } else {
+            LambdaBody::Expr(Box::new(self.parse_expr()?))
+        };
+        Ok(Expr::Lazy { body })
+    }
+
+    fn parse_postfix_expr(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_primary_expr()?;
+        loop {
+            if self.at(TokenKind::Apostrophe) {
+                self.bump();
+                let name = self.expect_identifier()?;
+                expr = Expr::Member {
+                    base: Box::new(expr),
+                    name,
+                };
+                continue;
             }
+            if self.at(TokenKind::LParen) {
+                self.bump();
+                let args = self.parse_arg_list()?;
+                self.expect(TokenKind::RParen)?;
+                expr = Expr::Call {
+                    callee: Box::new(expr),
+                    args,
+                };
+                continue;
+            }
+            break;
         }
+        Ok(expr)
+    }
+
+    fn parse_arg_list(&mut self) -> Result<Vec<Arg>, ParseError> {
+        let mut args = Vec::new();
+        if self.at(TokenKind::RParen) {
+            return Ok(args);
+        }
+        loop {
+            let checkpoint = self.pos;
+            if let Some(TokenKind::Identifier(name)) = self.peek_kind() {
+                let name = name.clone();
+                self.bump();
+                if self.at(TokenKind::Colon) {
+                    self.bump();
+                    let value = self.parse_expr()?;
+                    args.push(Arg::Named { name, value });
+                } else {
+                    self.pos = checkpoint;
+                    args.push(Arg::Positional(self.parse_expr()?));
+                }
+            } else {
+                args.push(Arg::Positional(self.parse_expr()?));
+            }
+            if !self.at(TokenKind::Comma) {
+                break;
+            }
+            self.bump();
+        }
+        Ok(args)
+    }
+
+    fn parse_primary_expr(&mut self) -> Result<Expr, ParseError> {
+        match self.peek_kind().cloned() {
+            Some(TokenKind::Identifier(name)) => {
+                self.bump();
+                Ok(Expr::Name(name))
+            }
+            Some(TokenKind::Keyword(Keyword::Me)) => {
+                self.bump();
+                Ok(Expr::Name("me".to_string()))
+            }
+            Some(TokenKind::Keyword(Keyword::It)) => {
+                self.bump();
+                Ok(Expr::Name("it".to_string()))
+            }
+            Some(TokenKind::Integer(value)) => {
+                self.bump();
+                Ok(Expr::Integer(value))
+            }
+            Some(TokenKind::String(value)) => {
+                self.bump();
+                Ok(Expr::String(value))
+            }
+            Some(TokenKind::Underscore) => {
+                self.bump();
+                Ok(Expr::Placeholder)
+            }
+            Some(TokenKind::LParen) => {
+                self.bump();
+                let expr = self.parse_expr()?;
+                self.expect(TokenKind::RParen)?;
+                Ok(expr)
+            }
+            other => Err(ParseError::new(format!(
+                "unexpected token in expression: {:?}",
+                other
+            ))),
+        }
+    }
+
+    fn consume_optional_newline(&mut self) {
+        if self.at(TokenKind::Newline) {
+            self.bump();
+        }
+        self.skip_newlines();
     }
 
     fn skip_newlines(&mut self) {
-        while matches!(self.peek_kind(), Some(TokenKind::Newline)) {
-            self.pos += 1;
+        while self.at(TokenKind::Newline) {
+            self.bump();
         }
+    }
+
+    fn at_keyword(&self, keyword: Keyword) -> bool {
+        matches!(self.peek_kind(), Some(TokenKind::Keyword(k)) if *k == keyword)
+    }
+
+    fn at(&self, kind: TokenKind) -> bool {
+        matches!(self.peek_kind(), Some(k) if *k == kind)
     }
 
     fn at_eof(&self) -> bool {
         matches!(self.peek_kind(), Some(TokenKind::Eof) | None)
+    }
+
+    fn expect_keyword(&mut self, keyword: Keyword) -> Result<(), ParseError> {
+        if self.at_keyword(keyword.clone()) {
+            self.bump();
+            Ok(())
+        } else {
+            Err(ParseError::new(format!("expected keyword {:?}", keyword)))
+        }
+    }
+
+    fn expect(&mut self, kind: TokenKind) -> Result<(), ParseError> {
+        if self.at(kind.clone()) {
+            self.bump();
+            Ok(())
+        } else {
+            Err(ParseError::new(format!("expected token {:?}", kind)))
+        }
+    }
+
+    fn expect_identifier(&mut self) -> Result<String, ParseError> {
+        match self.peek_kind().cloned() {
+            Some(TokenKind::Identifier(name)) => {
+                self.bump();
+                Ok(name)
+            }
+            other => Err(ParseError::new(format!(
+                "expected identifier, found {:?}",
+                other
+            ))),
+        }
+    }
+
+    fn expect_effect_name(&mut self) -> Result<String, ParseError> {
+        match self.peek_kind().cloned() {
+            Some(TokenKind::Identifier(name)) => {
+                self.bump();
+                Ok(name)
+            }
+            Some(TokenKind::Keyword(Keyword::Py)) => {
+                self.bump();
+                Ok("py".to_string())
+            }
+            other => Err(ParseError::new(format!(
+                "expected effect name, found {:?}",
+                other
+            ))),
+        }
+    }
+
+    fn bump(&mut self) {
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
+        }
     }
 
     fn peek_kind(&self) -> Option<&TokenKind> {
@@ -81,15 +469,55 @@ mod tests {
     use crate::Lexer;
 
     #[test]
-    fn parses_module_shell() {
+    fn parses_import_and_function() {
         let src = r#"
-fun fact(n: Int) -> Int:
-    1
+from py pandas import read_csv
+
+fun load(path: Str) -> PyObj !py !throw:
+    val frame = read_csv(path)
+    frame
+.
+"#;
+        let tokens = Lexer::new(src).tokenize();
+        let mut parser = Parser::new(tokens);
+        let module = parser.parse_module().expect("module should parse");
+        assert_eq!(module.items.len(), 2);
+        match &module.items[0] {
+            Item::ImportPy(import) => {
+                assert_eq!(import.module, "pandas");
+                assert_eq!(import.names, vec!["read_csv"]);
+            }
+            other => panic!("expected import, got {other:?}"),
+        }
+        match &module.items[1] {
+            Item::Function(function) => {
+                assert_eq!(function.name, "load");
+                assert_eq!(function.effects, vec!["py", "throw"]);
+                assert_eq!(function.params.len(), 1);
+                assert_eq!(function.body.len(), 2);
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_member_access_lambda_and_lazy() {
+        let src = r#"
+fun demo() -> Unit:
+    val f = _'email
+    val g = lazy me'name
+    users'filter(x => x'active)
 .
 "#;
         let tokens = Lexer::new(src).tokenize();
         let mut parser = Parser::new(tokens);
         let module = parser.parse_module().expect("module should parse");
         assert_eq!(module.items.len(), 1);
+        match &module.items[0] {
+            Item::Function(function) => {
+                assert_eq!(function.body.len(), 3);
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
     }
 }

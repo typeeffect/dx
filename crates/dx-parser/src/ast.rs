@@ -5,8 +5,15 @@ pub struct Module {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    ImportPy(ImportPyDecl),
     Function(FunctionDecl),
     Statement(Stmt),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportPyDecl {
+    pub module: String,
+    pub names: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
