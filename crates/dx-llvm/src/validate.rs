@@ -2,6 +2,12 @@ use crate::llvm::{Function, Instruction, Module, Operand, Terminator, Type};
 use dx_parser::BinOp;
 use std::collections::{BTreeSet, HashMap};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DefSite {
+    Param,
+    Instruction { block: usize, index: usize },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationDiagnostic {
     pub function: Option<String>,
@@ -82,13 +88,19 @@ fn validate_function(
     let mut defined_registers = BTreeSet::new();
     let mut register_types = HashMap::new();
     let mut pack_env_registers = BTreeSet::new();
+    let mut block_index = HashMap::new();
+    let mut reg_defs = HashMap::new();
+    for (idx, block) in function.blocks.iter().enumerate() {
+        block_index.insert(block.label.clone(), idx);
+    }
     for param in &function.params {
         defined_registers.insert(param.name.clone());
         register_types.insert(param.name.clone(), param.ty.clone());
+        reg_defs.insert(param.name.clone(), DefSite::Param);
     }
 
-    for block in &function.blocks {
-        for instr in &block.instructions {
+    for (block_id, block) in function.blocks.iter().enumerate() {
+        for (instr_index, instr) in block.instructions.iter().enumerate() {
             match instr {
                 Instruction::Assign { result, .. } | Instruction::BinaryOp { result, .. } => {
                     let ty = match instr {
@@ -96,6 +108,13 @@ fn validate_function(
                         _ => unreachable!(),
                     };
                     register_types.insert(result.clone(), ty);
+                    reg_defs.insert(
+                        result.clone(),
+                        DefSite::Instruction {
+                            block: block_id,
+                            index: instr_index,
+                        },
+                    );
                     if !defined_registers.insert(result.clone()) {
                         diagnostics.push(ValidationDiagnostic {
                             function: Some(function.name.clone()),
@@ -107,6 +126,13 @@ fn validate_function(
                 Instruction::PackEnv { result, .. } => {
                     pack_env_registers.insert(result.clone());
                     register_types.insert(result.clone(), Type::Ptr);
+                    reg_defs.insert(
+                        result.clone(),
+                        DefSite::Instruction {
+                            block: block_id,
+                            index: instr_index,
+                        },
+                    );
                     if !defined_registers.insert(result.clone()) {
                         diagnostics.push(ValidationDiagnostic {
                             function: Some(function.name.clone()),
@@ -122,6 +148,13 @@ fn validate_function(
                             _ => unreachable!(),
                         };
                         register_types.insert(result.clone(), ret);
+                        reg_defs.insert(
+                            result.clone(),
+                            DefSite::Instruction {
+                                block: block_id,
+                                index: instr_index,
+                            },
+                        );
                         if !defined_registers.insert(result.clone()) {
                             diagnostics.push(ValidationDiagnostic {
                                 function: Some(function.name.clone()),
@@ -135,14 +168,20 @@ fn validate_function(
         }
     }
 
-    for block in &function.blocks {
-        for instr in &block.instructions {
+    let dominators = compute_dominators(function, &block_index);
+
+    for (block_id, block) in function.blocks.iter().enumerate() {
+        for (instr_index, instr) in block.instructions.iter().enumerate() {
             match instr {
                 Instruction::Assign { ty, value, .. } => {
                     validate_operand_defined(
                         value,
                         &defined_registers,
                         &register_types,
+                        &reg_defs,
+                        &dominators,
+                        block_id,
+                        Some(instr_index),
                         function,
                         block,
                         diagnostics,
@@ -165,6 +204,10 @@ fn validate_function(
                         lhs,
                         &defined_registers,
                         &register_types,
+                        &reg_defs,
+                        &dominators,
+                        block_id,
+                        Some(instr_index),
                         function,
                         block,
                         diagnostics,
@@ -173,6 +216,10 @@ fn validate_function(
                         rhs,
                         &defined_registers,
                         &register_types,
+                        &reg_defs,
+                        &dominators,
+                        block_id,
+                        Some(instr_index),
                         function,
                         block,
                         diagnostics,
@@ -187,6 +234,10 @@ fn validate_function(
                             capture,
                             &defined_registers,
                             &register_types,
+                            &reg_defs,
+                            &dominators,
+                            block_id,
+                            Some(instr_index),
                             function,
                             block,
                             diagnostics,
@@ -244,6 +295,10 @@ fn validate_function(
                                 arg,
                                 &defined_registers,
                                 &register_types,
+                                &reg_defs,
+                                &dominators,
+                                block_id,
+                                Some(instr_index),
                                 function,
                                 block,
                                 diagnostics,
@@ -288,9 +343,94 @@ fn validate_function(
             &block_labels,
             &defined_registers,
             &register_types,
+            &reg_defs,
+            &dominators,
+            block_id,
             global_symbols,
             diagnostics,
         );
+    }
+}
+
+fn compute_dominators(
+    function: &Function,
+    block_index: &HashMap<String, usize>,
+) -> Vec<BTreeSet<usize>> {
+    let n = function.blocks.len();
+    if n == 0 {
+        return Vec::new();
+    }
+
+    let mut preds: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (idx, block) in function.blocks.iter().enumerate() {
+        for succ in successors(&block.terminator, block_index) {
+            preds[succ].push(idx);
+        }
+    }
+
+    let all: BTreeSet<usize> = (0..n).collect();
+    let mut doms = vec![all.clone(); n];
+    doms[0] = BTreeSet::from([0]);
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for b in 1..n {
+            let mut new = if preds[b].is_empty() {
+                all.clone()
+            } else {
+                let mut it = preds[b].iter();
+                let first = *it.next().unwrap();
+                let mut acc = doms[first].clone();
+                for p in it {
+                    acc = acc.intersection(&doms[*p]).copied().collect();
+                }
+                acc
+            };
+            new.insert(b);
+            if new != doms[b] {
+                doms[b] = new;
+                changed = true;
+            }
+        }
+    }
+
+    doms
+}
+
+fn successors(
+    term: &Terminator,
+    block_index: &HashMap<String, usize>,
+) -> Vec<usize> {
+    match term {
+        Terminator::Ret(_) | Terminator::Unreachable => Vec::new(),
+        Terminator::Br(label) => block_index.get(label).copied().into_iter().collect(),
+        Terminator::CondBr {
+            then_label,
+            else_label,
+            ..
+        } => {
+            let mut out = Vec::new();
+            if let Some(idx) = block_index.get(then_label) {
+                out.push(*idx);
+            }
+            if let Some(idx) = block_index.get(else_label) {
+                out.push(*idx);
+            }
+            out
+        }
+        Terminator::MatchBr { arms, fallback, .. } => {
+            let mut out = Vec::new();
+            for (_, label) in arms {
+                if let Some(idx) = block_index.get(label) {
+                    out.push(*idx);
+                }
+            }
+            if let Some(idx) = block_index.get(fallback) {
+                out.push(*idx);
+            }
+            out
+        }
     }
 }
 
@@ -417,6 +557,10 @@ fn validate_operand_defined(
     operand: &Operand,
     defined_registers: &BTreeSet<String>,
     register_types: &HashMap<String, Type>,
+    reg_defs: &HashMap<String, DefSite>,
+    dominators: &[BTreeSet<usize>],
+    current_block: usize,
+    current_instr: Option<usize>,
     function: &Function,
     block: &crate::llvm::Block,
     diagnostics: &mut Vec<ValidationDiagnostic>,
@@ -441,7 +585,37 @@ fn validate_operand_defined(
                     ),
                 });
             }
+            if let Some(def_site) = reg_defs.get(name) {
+                if !register_available_at_use(*def_site, dominators, current_block, current_instr) {
+                    diagnostics.push(ValidationDiagnostic {
+                        function: Some(function.name.clone()),
+                        block: Some(block.label.clone()),
+                        message: format!(
+                            "register '{}' is not available at this use site",
+                            name
+                        ),
+                    });
+                }
+            }
         }
+    }
+}
+
+fn register_available_at_use(
+    def_site: DefSite,
+    dominators: &[BTreeSet<usize>],
+    current_block: usize,
+    current_instr: Option<usize>,
+) -> bool {
+    match def_site {
+        DefSite::Param => true,
+        DefSite::Instruction { block, index } if block == current_block => {
+            current_instr.map(|use_idx| index < use_idx).unwrap_or(true)
+        }
+        DefSite::Instruction { block, .. } => dominators
+            .get(current_block)
+            .map(|doms| doms.contains(&block))
+            .unwrap_or(false),
     }
 }
 
@@ -491,6 +665,9 @@ fn validate_terminator(
     block_labels: &BTreeSet<String>,
     defined_registers: &BTreeSet<String>,
     register_types: &HashMap<String, Type>,
+    reg_defs: &HashMap<String, DefSite>,
+    dominators: &[BTreeSet<usize>],
+    current_block: usize,
     global_symbols: &BTreeSet<String>,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
@@ -501,6 +678,10 @@ fn validate_terminator(
                     value,
                     defined_registers,
                     register_types,
+                    reg_defs,
+                    dominators,
+                    current_block,
+                    None,
                     function,
                     block,
                     diagnostics,
@@ -526,6 +707,10 @@ fn validate_terminator(
                     value,
                     defined_registers,
                     register_types,
+                    reg_defs,
+                    dominators,
+                    current_block,
+                    None,
                     function,
                     block,
                     diagnostics,
@@ -552,6 +737,10 @@ fn validate_terminator(
                 cond,
                 defined_registers,
                 register_types,
+                reg_defs,
+                dominators,
+                current_block,
+                None,
                 function,
                 block,
                 diagnostics,
@@ -588,6 +777,10 @@ fn validate_terminator(
                 scrutinee,
                 defined_registers,
                 register_types,
+                reg_defs,
+                dominators,
+                current_block,
+                None,
                 function,
                 block,
                 diagnostics,
@@ -721,6 +914,91 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("use of undefined register '%missing'")));
+    }
+
+    #[test]
+    fn rejects_use_before_definition_in_same_block() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::I64,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![
+                        Instruction::Assign {
+                            result: "%1".into(),
+                            ty: Type::I64,
+                            value: Operand::Register("%2".into(), Type::I64),
+                        },
+                        Instruction::Assign {
+                            result: "%2".into(),
+                            ty: Type::I64,
+                            value: Operand::ConstInt(1),
+                        },
+                    ],
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("register '%2' is not available at this use site")));
+    }
+
+    #[test]
+    fn rejects_cross_block_use_without_dominance() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![Param {
+                    name: "%0".into(),
+                    ty: Type::I1,
+                }],
+                ret: Type::I64,
+                blocks: vec![
+                    Block {
+                        label: "bb0".into(),
+                        instructions: vec![],
+                        terminator: Terminator::CondBr {
+                            cond: Operand::Register("%0".into(), Type::I1),
+                            then_label: "bb1".into(),
+                            else_label: "bb2".into(),
+                        },
+                    },
+                    Block {
+                        label: "bb1".into(),
+                        instructions: vec![Instruction::Assign {
+                            result: "%1".into(),
+                            ty: Type::I64,
+                            value: Operand::ConstInt(1),
+                        }],
+                        terminator: Terminator::Br("bb3".into()),
+                    },
+                    Block {
+                        label: "bb2".into(),
+                        instructions: vec![],
+                        terminator: Terminator::Br("bb3".into()),
+                    },
+                    Block {
+                        label: "bb3".into(),
+                        instructions: vec![],
+                        terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+                    },
+                ],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("register '%1' is not available at this use site")));
     }
 
     #[test]
