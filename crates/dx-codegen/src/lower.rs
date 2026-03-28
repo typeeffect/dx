@@ -154,8 +154,16 @@ fn lower_runtime_op(op: &RuntimeOp, locals: &[mir::Local]) -> LowStep {
         symbol: op.runtime_symbol,
         ret: Some(low_ret_from_runtime_hook(op.hook)),
         kind: match &op.kind {
-            RuntimeOpKind::PyCall { arg_count, .. } => LowRuntimeCallKind::PyCall {
+            RuntimeOpKind::PyCall {
+                arg_count,
+                runtime_args,
+                ..
+            } => LowRuntimeCallKind::PyCall {
                 arg_count: *arg_count,
+                args: runtime_args
+                    .iter()
+                    .map(|arg| lower_operand(arg, locals))
+                    .collect(),
             },
             RuntimeOpKind::ClosureCreate {
                 captures,

@@ -164,8 +164,13 @@ fn render_low_step(step: &LowStep, out: &mut String) {
             }
             write!(out, "call {symbol}").unwrap();
             match kind {
-                LowRuntimeCallKind::PyCall { arg_count } => {
-                    write!(out, " (args={arg_count})").unwrap();
+                LowRuntimeCallKind::PyCall { arg_count, args } => {
+                    let rendered = args
+                        .iter()
+                        .map(render_low_value)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(out, " (args={arg_count}, abi_args=[{rendered}])").unwrap();
                 }
                 LowRuntimeCallKind::ClosureCreate {
                     captures,
@@ -293,7 +298,7 @@ mod tests {
             "from py pandas import read_csv\n\nfun f(path: Str) -> PyObj !py:\n    read_csv(path)\n.\n",
         );
         assert!(out.contains("call dx_rt_py_call_function"), "got:\n{out}");
-        assert!(out.contains("(args=1)"), "got:\n{out}");
+        assert!(out.contains("(args=1, abi_args=[\"read_csv\", 1])"), "got:\n{out}");
         assert!(out.contains("-> ptr"), "got:\n{out}");
     }
 

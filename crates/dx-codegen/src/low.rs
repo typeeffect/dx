@@ -96,6 +96,7 @@ pub enum LowTerminator {
 pub enum LowRuntimeCallKind {
     PyCall {
         arg_count: u32,
+        args: Vec<LowValue>,
     },
     ClosureCreate {
         captures: Vec<LowValue>,

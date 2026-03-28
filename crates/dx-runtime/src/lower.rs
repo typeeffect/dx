@@ -20,6 +20,7 @@ pub struct LoweredPyCall {
     pub runtime_symbol: &'static str,
     pub dispatch: PyDispatchTarget,
     pub arg_count: u32,
+    pub runtime_args: Vec<mir::Operand>,
     pub effects: Vec<String>,
     pub result_type: Type,
 }
@@ -46,19 +47,39 @@ fn lower_call_site(
     site: &PyRuntimeCallSite,
     import_index: &HashMap<&str, &str>,
 ) -> LoweredPyCall {
-    let (hook, dispatch) = match &site.kind {
+    let (hook, dispatch, runtime_args) = match &site.kind {
         PyCallKind::Function { name } => (
             RuntimeHook::PyCallFunction,
             PyDispatchTarget::Function {
                 module: import_index.get(name.as_str()).map(|module| (*module).to_string()),
                 name: name.clone(),
             },
+            vec![
+                mir::Operand::Const(mir::Constant::String(name.clone())),
+                mir::Operand::Const(mir::Constant::Int(site.arg_count.to_string())),
+            ],
         ),
         PyCallKind::Member { name } => (
             RuntimeHook::PyCallMethod,
             PyDispatchTarget::Method { name: name.clone() },
+            vec![
+                site.receiver
+                    .clone()
+                    .expect("python member call should preserve receiver operand"),
+                mir::Operand::Const(mir::Constant::String(name.clone())),
+                mir::Operand::Const(mir::Constant::Int(site.arg_count.to_string())),
+            ],
         ),
-        PyCallKind::Dynamic => (RuntimeHook::PyCallDynamic, PyDispatchTarget::Dynamic),
+        PyCallKind::Dynamic => (
+            RuntimeHook::PyCallDynamic,
+            PyDispatchTarget::Dynamic,
+            vec![
+                site.callable
+                    .clone()
+                    .expect("python dynamic call should preserve callable operand"),
+                mir::Operand::Const(mir::Constant::Int(site.arg_count.to_string())),
+            ],
+        ),
     };
 
     LoweredPyCall {
@@ -69,6 +90,7 @@ fn lower_call_site(
         runtime_symbol: hook.symbol(),
         dispatch,
         arg_count: site.arg_count as u32,
+        runtime_args,
         effects: site.effects.clone(),
         result_type: site.result_type.clone(),
     }
@@ -108,6 +130,7 @@ mod tests {
             }
         );
         assert_eq!(ops[0].arg_count, 1);
+        assert_eq!(ops[0].runtime_args.len(), 2);
         assert_eq!(ops[0].result_type, Type::PyObj);
     }
 
@@ -127,6 +150,7 @@ mod tests {
                 name: "head".to_string(),
             }
         );
+        assert_eq!(ops[1].runtime_args.len(), 3);
     }
 
     #[test]
@@ -140,5 +164,6 @@ mod tests {
         assert_eq!(ops[1].hook, RuntimeHook::PyCallDynamic);
         assert_eq!(ops[1].runtime_symbol, "dx_rt_py_call_dynamic");
         assert_eq!(ops[1].dispatch, PyDispatchTarget::Dynamic);
+        assert_eq!(ops[1].runtime_args.len(), 2);
     }
 }

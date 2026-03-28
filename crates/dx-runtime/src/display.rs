@@ -317,7 +317,7 @@ fn render_runtime_op(op: &RuntimeOp) -> String {
     write!(out, "  {}", op.runtime_symbol).unwrap();
 
     match &op.kind {
-        RuntimeOpKind::PyCall { dispatch, arg_count } => {
+        RuntimeOpKind::PyCall { dispatch, arg_count, .. } => {
             write!(out, " {}", render_dispatch(dispatch)).unwrap();
             write!(out, "(args={arg_count})").unwrap();
         }

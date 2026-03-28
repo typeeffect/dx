@@ -158,7 +158,7 @@ fn lower_instructions(step: &LowStep, state: &mut LoweringState) -> Vec<Instruct
                 result: destination.map(|local| format!("%{}", local)),
                 symbol,
                 ret: ret.as_ref().map(lower_type).unwrap_or(Type::Void),
-                args: runtime_call_args(symbol, kind, state),
+                args: runtime_call_args(kind, state),
                 comment: Some(format!("stmt={statement}, {}", runtime_call_comment(kind))),
             }],
         },
@@ -176,28 +176,11 @@ fn lower_instructions(step: &LowStep, state: &mut LoweringState) -> Vec<Instruct
     }
 }
 
-fn runtime_call_args(
-    symbol: &str,
-    kind: &LowRuntimeCallKind,
-    state: &mut LoweringState,
-) -> Vec<Operand> {
+fn runtime_call_args(kind: &LowRuntimeCallKind, state: &mut LoweringState) -> Vec<Operand> {
     match kind {
-        LowRuntimeCallKind::PyCall { arg_count } => match symbol {
-            "dx_rt_py_call_function" => vec![
-                Operand::Register("%py_function".into(), Type::Ptr),
-                Operand::ConstInt(i64::from(*arg_count)),
-            ],
-            "dx_rt_py_call_method" => vec![
-                Operand::Register("%py_receiver".into(), Type::Ptr),
-                Operand::Register("%py_method".into(), Type::Ptr),
-                Operand::ConstInt(i64::from(*arg_count)),
-            ],
-            "dx_rt_py_call_dynamic" => vec![
-                Operand::Register("%py_callable".into(), Type::Ptr),
-                Operand::ConstInt(i64::from(*arg_count)),
-            ],
-            _ => vec![Operand::ConstInt(i64::from(*arg_count))],
-        },
+        LowRuntimeCallKind::PyCall { args, .. } => {
+            args.iter().map(|arg| lower_value(arg, state)).collect()
+        }
         LowRuntimeCallKind::ClosureCreate { .. } => unreachable!("closure create lowered separately"),
         LowRuntimeCallKind::ClosureInvoke {
             closure,
@@ -215,7 +198,9 @@ fn runtime_call_args(
 
 fn runtime_call_comment(kind: &LowRuntimeCallKind) -> String {
     match kind {
-        LowRuntimeCallKind::PyCall { arg_count } => format!("py-call args={arg_count}"),
+        LowRuntimeCallKind::PyCall { arg_count, args } => {
+            format!("py-call args={arg_count} abi_args={}", args.len())
+        }
         LowRuntimeCallKind::ClosureCreate {
             captures,
             arity,

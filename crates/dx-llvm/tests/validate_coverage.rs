@@ -1006,5 +1006,31 @@ fn mixed_string_global_closure_thunk() {
     );
     // Closure + thunk + potentially a string global
     assert!(rendered.contains("@dx_rt_closure_create"), "create:\n{rendered}");
-    // Module renders without panic — the exact global behavior depends on lowering
+}
+
+// ── validator: global operand typing ──────────────────────────────
+
+#[test]
+fn validator_rejects_non_ptr_global_operand() {
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![GlobalString { symbol: ".str0".into(), value: "hello".into() }],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::I64, // mismatched: should be Ptr for a string global
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![],
+                terminator: Terminator::Ret(Some(Operand::Global(".str0".into(), Type::I64))),
+            }],
+        }],
+    };
+    let report = validate_module(&module);
+    assert!(
+        has_diag(&report, "must have Ptr type"),
+        "validator should reject non-ptr global operands: {:?}",
+        report.diagnostics
+    );
 }

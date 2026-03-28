@@ -30,6 +30,7 @@ pub enum RuntimeOpKind {
     PyCall {
         dispatch: PyDispatchTarget,
         arg_count: u32,
+        runtime_args: Vec<mir::Operand>,
     },
     ClosureCreate {
         captures: Vec<mir::ClosureCapture>,
@@ -83,6 +84,7 @@ pub fn build_runtime_ops_plan(module: &mir::Module) -> RuntimeOpsPlan {
             kind: RuntimeOpKind::PyCall {
                 dispatch: call.dispatch.clone(),
                 arg_count: call.arg_count,
+                runtime_args: call.runtime_args.clone(),
             },
         });
     }
@@ -284,5 +286,31 @@ mod tests {
         let mut sorted = positions.clone();
         sorted.sort();
         assert_eq!(positions, sorted);
+    }
+
+    #[test]
+    fn python_runtime_ops_preserve_concrete_abi_args() {
+        let module = lower(
+            "from py pandas import read_csv\n\nfun run(path: Str) -> PyObj !py:\n    read_csv(path)'head()\n.\n",
+        );
+        let plan = build_runtime_ops_plan(&module);
+        let py_ops: Vec<_> = plan
+            .ops
+            .iter()
+            .filter(|op| matches!(op.kind, RuntimeOpKind::PyCall { .. }))
+            .collect();
+
+        assert_eq!(py_ops.len(), 2);
+        assert!(matches!(
+            &py_ops[0].kind,
+            RuntimeOpKind::PyCall { runtime_args, .. }
+            if matches!(runtime_args[0], mir::Operand::Const(mir::Constant::String(_)))
+        ));
+        assert!(matches!(
+            &py_ops[1].kind,
+            RuntimeOpKind::PyCall { runtime_args, .. }
+            if matches!(runtime_args[0], mir::Operand::Copy(_))
+                && matches!(runtime_args[1], mir::Operand::Const(mir::Constant::String(_)))
+        ));
     }
 }
