@@ -61,6 +61,14 @@ fn render_block(out: &mut String, block: &Block) {
 
 fn render_instruction(instr: &Instruction) -> String {
     match instr {
+        Instruction::PackEnv { result, captures } => {
+            let captures = captures
+                .iter()
+                .map(render_operand)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{result} = pack_env [{captures}]")
+        }
         Instruction::CallExtern {
             result,
             symbol,
@@ -233,6 +241,7 @@ mod tests {
     #[test]
     fn snapshot_closure_create_instruction() {
         let out = render("fun f(x: Int) -> lazy Int:\n    lazy x\n.\n");
+        assert!(out.contains("pack_env [i64 %0]"), "got:\n{out}");
         assert!(out.contains("call ptr @dx_rt_closure_create("), "got:\n{out}");
         assert!(out.contains("closure-create"), "got:\n{out}");
     }

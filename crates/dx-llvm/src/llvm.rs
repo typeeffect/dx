@@ -34,6 +34,10 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
+    PackEnv {
+        result: String,
+        captures: Vec<Operand>,
+    },
     CallExtern {
         result: Option<String>,
         symbol: &'static str,

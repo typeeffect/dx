@@ -69,6 +69,7 @@ fn validate_function(
     for block in &function.blocks {
         for instr in &block.instructions {
             match instr {
+                Instruction::PackEnv { result: _, captures: _ } => {}
                 Instruction::CallExtern {
                     result: _,
                     symbol,

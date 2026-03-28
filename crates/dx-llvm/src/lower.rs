@@ -36,7 +36,7 @@ pub fn lower_module(low: &LowModule) -> Module {
                     instructions: block
                         .steps
                         .iter()
-                        .map(lower_instruction)
+                        .flat_map(lower_instructions)
                         .collect(),
                     terminator: lower_terminator(&block.terminator),
                 })
@@ -73,7 +73,7 @@ fn lower_terminator(term: &LowTerminator) -> Terminator {
     }
 }
 
-fn lower_instruction(step: &LowStep) -> Instruction {
+fn lower_instructions(step: &LowStep) -> Vec<Instruction> {
     match step {
         LowStep::RuntimeCall {
             statement,
@@ -81,24 +81,42 @@ fn lower_instruction(step: &LowStep) -> Instruction {
             symbol,
             ret,
             kind,
-        } => Instruction::CallExtern {
-            result: destination.map(|local| format!("%{}", local)),
-            symbol,
-            ret: ret.as_ref().map(lower_type).unwrap_or(Type::Void),
-            args: runtime_call_args(symbol, kind),
-            comment: Some(format!("stmt={statement}, {}", runtime_call_comment(kind))),
+        } => match kind {
+            LowRuntimeCallKind::ClosureCreate { captures, arity } => {
+                let env = format!("%env_{statement}");
+                vec![
+                    Instruction::PackEnv {
+                        result: env.clone(),
+                        captures: captures.iter().map(lower_value).collect(),
+                    },
+                    Instruction::CallExtern {
+                        result: destination.map(|local| format!("%{}", local)),
+                        symbol,
+                        ret: ret.as_ref().map(lower_type).unwrap_or(Type::Void),
+                        args: vec![Operand::Register(env, Type::Ptr), Operand::ConstInt(*arity as i64)],
+                        comment: Some(format!("stmt={statement}, {}", runtime_call_comment(kind))),
+                    },
+                ]
+            }
+            _ => vec![Instruction::CallExtern {
+                result: destination.map(|local| format!("%{}", local)),
+                symbol,
+                ret: ret.as_ref().map(lower_type).unwrap_or(Type::Void),
+                args: runtime_call_args(symbol, kind),
+                comment: Some(format!("stmt={statement}, {}", runtime_call_comment(kind))),
+            }],
         },
         LowStep::ThrowCheck {
             statement,
             symbol,
             boundary,
-        } => Instruction::CallExtern {
+        } => vec![Instruction::CallExtern {
             result: None,
             symbol,
             ret: Type::Void,
             args: vec![],
             comment: Some(format!("stmt={statement}, throw-boundary={boundary:?}")),
-        },
+        }],
     }
 }
 
@@ -120,13 +138,7 @@ fn runtime_call_args(symbol: &str, kind: &LowRuntimeCallKind) -> Vec<Operand> {
             ],
             _ => vec![Operand::ConstInt(i64::from(*arg_count))],
         },
-        LowRuntimeCallKind::ClosureCreate {
-            captures: _,
-            arity,
-        } => vec![
-            Operand::Register("%closure_env".into(), Type::Ptr),
-            Operand::ConstInt(*arity as i64),
-        ],
+        LowRuntimeCallKind::ClosureCreate { .. } => unreachable!("closure create lowered separately"),
         LowRuntimeCallKind::ClosureInvoke {
             closure,
             arg_count,
