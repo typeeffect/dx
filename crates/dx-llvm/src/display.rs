@@ -80,6 +80,20 @@ fn render_block(out: &mut String, block: &Block) {
 
 fn render_instruction(instr: &Instruction) -> String {
     match instr {
+        Instruction::Assign { result, ty: _, value } => format!("{result} = copy {}", render_operand(value)),
+        Instruction::BinaryOp {
+            result,
+            op,
+            ty,
+            lhs,
+            rhs,
+        } => format!(
+            "{result} = {} {} {}, {}",
+            render_binop(op, ty),
+            render_type(ty),
+            render_operand(lhs),
+            render_operand(rhs)
+        ),
         Instruction::PackEnv { result, captures } => {
             let captures = captures
                 .iter()
@@ -110,6 +124,31 @@ fn render_instruction(instr: &Instruction) -> String {
             }
             out
         }
+    }
+}
+
+fn render_binop(op: &dx_parser::BinOp, ty: &Type) -> &'static str {
+    match op {
+        dx_parser::BinOp::Add => "add",
+        dx_parser::BinOp::Sub => "sub",
+        dx_parser::BinOp::Mul => "mul",
+        dx_parser::BinOp::Lt => match ty {
+            Type::I64 => "icmp slt",
+            _ => "icmp lt",
+        },
+        dx_parser::BinOp::LtEq => match ty {
+            Type::I64 => "icmp sle",
+            _ => "icmp le",
+        },
+        dx_parser::BinOp::Gt => match ty {
+            Type::I64 => "icmp sgt",
+            _ => "icmp gt",
+        },
+        dx_parser::BinOp::GtEq => match ty {
+            Type::I64 => "icmp sge",
+            _ => "icmp ge",
+        },
+        dx_parser::BinOp::EqEq => "icmp eq",
     }
 }
 
@@ -280,6 +319,18 @@ mod tests {
         );
         assert!(out.contains("call ptr @dx_rt_py_call_function("), "got:\n{out}");
         assert!(out.contains("; stmt=0, py-call"), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_plain_assignment_instruction() {
+        let out = render("fun f() -> Int:\n    val y = 42\n    y\n.\n");
+        assert!(out.contains("= copy i64 42"), "got:\n{out}");
+    }
+
+    #[test]
+    fn snapshot_binary_op_instruction() {
+        let out = render("fun f(x: Int) -> Int:\n    val y = x + 1\n    y\n.\n");
+        assert!(out.contains("= add i64 i64 %0, i64 1"), "got:\n{out}");
     }
 
     #[test]

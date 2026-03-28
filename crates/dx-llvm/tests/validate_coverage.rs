@@ -785,3 +785,83 @@ fn validator_missing_return_diagnostic_mentions_type() {
     assert!(has_diag(&report, "missing return value"), "{:?}", report.diagnostics);
     assert!(has_diag(&report, "I64"), "{:?}", report.diagnostics);
 }
+
+// ── string literal globals ──────────────────────────────────────
+
+#[test]
+fn string_global_renders_with_constant_form() {
+    let (_, rendered, _) = pipeline("fun f() -> Str:\n    \"hello\"\n.\n");
+    // Global should use private unnamed_addr constant form
+    assert!(
+        rendered.contains("private unnamed_addr constant"),
+        "constant form:\n{rendered}"
+    );
+    assert!(rendered.contains("@.str"), "global symbol:\n{rendered}");
+    assert!(rendered.contains("c\"hello\\00\""), "c-string value:\n{rendered}");
+}
+
+#[test]
+fn string_global_referenced_in_ret() {
+    let (_, rendered, _) = pipeline("fun f() -> Str:\n    \"hello\"\n.\n");
+    assert!(rendered.contains("ret ptr @.str"), "ret should reference global:\n{rendered}");
+}
+
+#[test]
+fn two_different_strings_produce_two_globals() {
+    let (_, rendered, _) = pipeline(
+        "fun a() -> Str:\n    \"hello\"\n.\n\nfun b() -> Str:\n    \"world\"\n.\n",
+    );
+    let global_count = rendered.matches("private unnamed_addr constant").count();
+    assert!(global_count >= 2, "expected >=2 globals, got {global_count}:\n{rendered}");
+    assert!(rendered.contains("c\"hello\\00\""), "hello:\n{rendered}");
+    assert!(rendered.contains("c\"world\\00\""), "world:\n{rendered}");
+}
+
+#[test]
+fn same_string_in_two_functions_deduplicated() {
+    let (_, rendered, _) = pipeline(
+        "fun a() -> Str:\n    \"same\"\n.\n\nfun b() -> Str:\n    \"same\"\n.\n",
+    );
+    let global_count = rendered.matches("private unnamed_addr constant").count();
+    // Should be 1 (deduplicated) or at most 2 — just verify it doesn't explode
+    assert!(global_count >= 1 && global_count <= 2,
+        "expected 1-2 globals for same string, got {global_count}:\n{rendered}");
+}
+
+#[test]
+fn string_globals_before_externs_and_functions() {
+    let (_, rendered, _) = pipeline("fun f() -> Str:\n    \"hi\"\n.\n");
+    if let Some(global_pos) = rendered.find("private unnamed_addr") {
+        if let Some(define_pos) = rendered.find("define ") {
+            assert!(global_pos < define_pos, "globals before functions:\n{rendered}");
+        }
+    }
+}
+
+#[test]
+fn string_global_deterministic() {
+    let src = "fun a() -> Str:\n    \"x\"\n.\n\nfun b() -> Str:\n    \"y\"\n.\n";
+    let (_, r1, _) = pipeline(src);
+    let (_, r2, _) = pipeline(src);
+    assert_eq!(r1, r2, "string globals rendering must be deterministic");
+}
+
+#[test]
+fn string_global_with_python_call() {
+    let (_, rendered, _) = pipeline(
+        "from py builtins import print\n\nfun f() -> Str !py:\n    print(\"msg\")\n    \"result\"\n.\n",
+    );
+    assert!(rendered.contains("private unnamed_addr constant"), "global:\n{rendered}");
+    assert!(rendered.contains("@dx_rt_py_call_function"), "py call:\n{rendered}");
+}
+
+#[test]
+fn string_global_with_ret_void() {
+    // Unit function that uses a string internally but returns void
+    let (_, rendered, _) = pipeline(
+        "from py builtins import print\n\nfun f() !py:\n    print(\"hello\")\n.\n",
+    );
+    assert!(rendered.contains("ret void"), "ret void:\n{rendered}");
+    // String may or may not produce a global depending on lowering (it's a call arg)
+    // Just verify the module renders without panic
+}

@@ -1,3 +1,5 @@
+use dx_parser::BinOp;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     pub globals: Vec<GlobalString>,
@@ -41,6 +43,18 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
+    Assign {
+        result: String,
+        ty: Type,
+        value: Operand,
+    },
+    BinaryOp {
+        result: String,
+        op: BinOp,
+        ty: Type,
+        lhs: Operand,
+        rhs: Operand,
+    },
     PackEnv {
         result: String,
         captures: Vec<Operand>,

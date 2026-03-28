@@ -1,6 +1,6 @@
 use crate::low::{
-    LowBlock, LowExtern, LowFunction, LowModule, LowParam, LowRuntimeCallKind, LowStep,
-    LowTerminator, LowType, LowValue,
+    LowAssignValue, LowBlock, LowExtern, LowFunction, LowModule, LowParam, LowRuntimeCallKind,
+    LowStep, LowTerminator, LowType, LowValue,
 };
 use dx_hir::Type;
 use dx_mir::mir;
@@ -85,17 +85,20 @@ fn lower_function(
         .enumerate()
         .map(|(block_id, block)| {
             let mut steps = Vec::new();
-            for ((name, bb, stmt), ops) in ops_by_pos.iter() {
-                if name != &function.name || *bb != block_id {
-                    continue;
+            for (stmt_idx, stmt) in block.statements.iter().enumerate() {
+                if let Some(step) = lower_plain_statement(stmt, &function.locals) {
+                    steps.push(step);
                 }
-                for op in ops {
-                    steps.push(lower_runtime_op(op, &function.locals));
+                let key = (function.name.clone(), block_id, stmt_idx);
+                if let Some(ops) = ops_by_pos.get(&key) {
+                    for op in ops {
+                        steps.push(lower_runtime_op(op, &function.locals));
+                    }
                 }
-                if let Some(sites) = throw_by_pos.get(&(name.clone(), *bb, *stmt)) {
+                if let Some(sites) = throw_by_pos.get(&key) {
                     for site in sites {
                         steps.push(LowStep::ThrowCheck {
-                            statement: *stmt,
+                            statement: stmt_idx,
                             symbol: dx_runtime::ThrowRuntimeHook::CheckPending.symbol(),
                             boundary: site.boundary.clone(),
                         });
@@ -116,6 +119,32 @@ fn lower_function(
         ret,
         blocks,
     }
+}
+
+fn lower_plain_statement(stmt: &mir::Statement, locals: &[mir::Local]) -> Option<LowStep> {
+    let mir::Statement::Assign { place, value } = stmt;
+    let ty = low_type_from_dx(&locals[*place].ty);
+    if ty == LowType::Void {
+        return None;
+    }
+
+    let value = match value {
+        mir::Rvalue::Use(operand) => LowAssignValue::Use(lower_operand(operand, locals)),
+        mir::Rvalue::BinaryOp { op, lhs, rhs } => LowAssignValue::BinaryOp {
+            op: op.clone(),
+            lhs: lower_operand(lhs, locals),
+            rhs: lower_operand(rhs, locals),
+        },
+        mir::Rvalue::Member { .. } | mir::Rvalue::Call { .. } | mir::Rvalue::Closure { .. } => {
+            return None;
+        }
+    };
+
+    Some(LowStep::Assign {
+        destination: *place,
+        ty,
+        value,
+    })
 }
 
 fn lower_runtime_op(op: &RuntimeOp, locals: &[mir::Local]) -> LowStep {
@@ -346,6 +375,38 @@ mod tests {
             f.blocks[0].terminator,
             LowTerminator::Return(Some(LowValue::Local(_, LowType::I64)))
         ));
+    }
+
+    #[test]
+    fn lowers_constant_assignment_to_low_step() {
+        let module = typed_mir("fun f() -> Int:\n    val y = 42\n    y\n.\n");
+        let low = lower_module(&module);
+        let f = low.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(f.blocks[0].steps.iter().any(|step| matches!(
+            step,
+            LowStep::Assign {
+                destination: _,
+                ty: LowType::I64,
+                value: LowAssignValue::Use(LowValue::ConstInt(42))
+            }
+        )));
+    }
+
+    #[test]
+    fn lowers_binary_op_assignment_to_low_step() {
+        let module = typed_mir("fun f(x: Int) -> Int:\n    x + 1\n.\n");
+        let low = lower_module(&module);
+        let f = low.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(f.blocks[0].steps.iter().any(|step| matches!(
+            step,
+            LowStep::Assign {
+                ty: LowType::I64,
+                value: LowAssignValue::BinaryOp { op: dx_parser::BinOp::Add, .. },
+                ..
+            }
+        )));
     }
 
     #[test]

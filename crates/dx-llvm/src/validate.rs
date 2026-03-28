@@ -85,6 +85,15 @@ fn validate_function(
     for block in &function.blocks {
         for instr in &block.instructions {
             match instr {
+                Instruction::Assign { result, .. } | Instruction::BinaryOp { result, .. } => {
+                    if !defined_registers.insert(result.clone()) {
+                        diagnostics.push(ValidationDiagnostic {
+                            function: Some(function.name.clone()),
+                            block: Some(block.label.clone()),
+                            message: format!("duplicate register definition '{}'", result),
+                        });
+                    }
+                }
                 Instruction::PackEnv { result, .. } => {
                     if !defined_registers.insert(result.clone()) {
                         diagnostics.push(ValidationDiagnostic {
@@ -112,6 +121,24 @@ fn validate_function(
     for block in &function.blocks {
         for instr in &block.instructions {
             match instr {
+                Instruction::Assign { ty, value, .. } => {
+                    validate_operand_defined(value, &defined_registers, function, block, diagnostics);
+                    if operand_type(value) != *ty {
+                        diagnostics.push(ValidationDiagnostic {
+                            function: Some(function.name.clone()),
+                            block: Some(block.label.clone()),
+                            message: format!(
+                                "assign type mismatch: got {:?}, destination is {:?}",
+                                operand_type(value),
+                                ty
+                            ),
+                        });
+                    }
+                }
+                Instruction::BinaryOp { lhs, rhs, .. } => {
+                    validate_operand_defined(lhs, &defined_registers, function, block, diagnostics);
+                    validate_operand_defined(rhs, &defined_registers, function, block, diagnostics);
+                }
                 Instruction::PackEnv { result: _, captures } => {
                     for capture in captures {
                         validate_operand_defined(

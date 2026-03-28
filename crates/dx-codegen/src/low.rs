@@ -1,4 +1,5 @@
 use dx_mir::mir;
+use dx_parser::BinOp;
 use dx_runtime::{RuntimeExternAbiType, ThrowBoundaryKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +38,11 @@ pub struct LowBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LowStep {
+    Assign {
+        destination: mir::LocalId,
+        ty: LowType,
+        value: LowAssignValue,
+    },
     RuntimeCall {
         statement: usize,
         destination: Option<mir::LocalId>,
@@ -48,6 +54,16 @@ pub enum LowStep {
         statement: usize,
         symbol: &'static str,
         boundary: ThrowBoundaryKind,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LowAssignValue {
+    Use(LowValue),
+    BinaryOp {
+        op: BinOp,
+        lhs: LowValue,
+        rhs: LowValue,
     },
 }
 

@@ -1,5 +1,6 @@
 use crate::low::{
-    LowFunction, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowType, LowValue,
+    LowAssignValue, LowFunction, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowType,
+    LowValue,
 };
 use std::fmt::Write;
 
@@ -122,6 +123,35 @@ fn render_low_value(value: &LowValue) -> String {
 
 fn render_low_step(step: &LowStep, out: &mut String) {
     match step {
+        LowStep::Assign {
+            destination,
+            ty,
+            value,
+        } => {
+            write!(out, "_{destination}: {} = ", low_type_str(ty)).unwrap();
+            match value {
+                LowAssignValue::Use(value) => write!(out, "{}", render_low_value(value)).unwrap(),
+                LowAssignValue::BinaryOp { op, lhs, rhs } => {
+                    write!(
+                        out,
+                        "{} {} {}",
+                        render_low_value(lhs),
+                        match op {
+                            dx_parser::BinOp::Add => "+",
+                            dx_parser::BinOp::Sub => "-",
+                            dx_parser::BinOp::Mul => "*",
+                            dx_parser::BinOp::Lt => "<",
+                            dx_parser::BinOp::LtEq => "<=",
+                            dx_parser::BinOp::Gt => ">",
+                            dx_parser::BinOp::GtEq => ">=",
+                            dx_parser::BinOp::EqEq => "==",
+                        },
+                        render_low_value(rhs)
+                    )
+                    .unwrap();
+                }
+            }
+        }
         LowStep::RuntimeCall {
             statement,
             destination,

@@ -2,7 +2,7 @@ use crate::llvm::{
     Block, ExternDecl, Function, GlobalString, Instruction, Module, Operand, Param, Terminator,
     Type,
 };
-use dx_codegen::{low, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowValue};
+use dx_codegen::{low, LowAssignValue, LowModule, LowRuntimeCallKind, LowStep, LowTerminator, LowValue};
 use std::collections::BTreeMap;
 
 pub fn lower_module(low: &LowModule) -> Module {
@@ -110,6 +110,24 @@ fn lower_terminator(term: &LowTerminator, state: &mut LoweringState) -> Terminat
 
 fn lower_instructions(step: &LowStep, state: &mut LoweringState) -> Vec<Instruction> {
     match step {
+        LowStep::Assign {
+            destination,
+            ty,
+            value,
+        } => match value {
+            LowAssignValue::Use(value) => vec![Instruction::Assign {
+                result: format!("%{}", destination),
+                ty: lower_type(ty),
+                value: lower_value(value, state),
+            }],
+            LowAssignValue::BinaryOp { op, lhs, rhs } => vec![Instruction::BinaryOp {
+                result: format!("%{}", destination),
+                op: op.clone(),
+                ty: lower_type(ty),
+                lhs: lower_value(lhs, state),
+                rhs: lower_value(rhs, state),
+            }],
+        },
         LowStep::RuntimeCall {
             statement,
             destination,
@@ -270,6 +288,32 @@ mod tests {
         assert!(run.blocks[0].instructions.iter().any(|it| matches!(
             it,
             Instruction::CallExtern { symbol, .. } if *symbol == "dx_rt_throw_check_pending"
+        )));
+    }
+
+    #[test]
+    fn lowers_assignments_to_llvm_like_instructions() {
+        let mir = typed_mir("fun f() -> Int:\n    val y = 42\n    y\n.\n");
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+        let f = llvm.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(matches!(
+            f.blocks[0].instructions.first(),
+            Some(Instruction::Assign { ty: Type::I64, .. })
+        ));
+    }
+
+    #[test]
+    fn lowers_binary_ops_to_llvm_like_instructions() {
+        let mir = typed_mir("fun f(x: Int) -> Int:\n    val y = x + 1\n    y\n.\n");
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+        let f = llvm.functions.iter().find(|f| f.name == "f").expect("f");
+
+        assert!(f.blocks[0].instructions.iter().any(|it| matches!(
+            it,
+            Instruction::BinaryOp { op: dx_parser::BinOp::Add, ty: Type::I64, .. }
         )));
     }
 
