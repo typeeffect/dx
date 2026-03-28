@@ -80,6 +80,7 @@ fn validate_function(
     }
 
     let mut defined_registers = BTreeSet::new();
+    let mut pack_env_registers = BTreeSet::new();
     for param in &function.params {
         defined_registers.insert(param.name.clone());
     }
@@ -97,6 +98,7 @@ fn validate_function(
                     }
                 }
                 Instruction::PackEnv { result, .. } => {
+                    pack_env_registers.insert(result.clone());
                     if !defined_registers.insert(result.clone()) {
                         diagnostics.push(ValidationDiagnostic {
                             function: Some(function.name.clone()),
@@ -231,6 +233,15 @@ fn validate_function(
                             }
                         }
                     }
+
+                    validate_special_runtime_call(
+                        symbol,
+                        args,
+                        &pack_env_registers,
+                        function,
+                        block,
+                        diagnostics,
+                    );
                 }
             }
         }
@@ -243,6 +254,43 @@ fn validate_function(
             global_symbols,
             diagnostics,
         );
+    }
+}
+
+fn validate_special_runtime_call(
+    symbol: &str,
+    args: &[Operand],
+    pack_env_registers: &BTreeSet<String>,
+    function: &Function,
+    block: &crate::llvm::Block,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    if symbol != "dx_rt_closure_create" {
+        return;
+    }
+
+    let Some(first_arg) = args.first() else {
+        return;
+    };
+
+    match first_arg {
+        Operand::Register(name, Type::Ptr) if pack_env_registers.contains(name) => {}
+        Operand::Register(name, Type::Ptr) => diagnostics.push(ValidationDiagnostic {
+            function: Some(function.name.clone()),
+            block: Some(block.label.clone()),
+            message: format!(
+                "closure create expects first arg to be a PackEnv result, got register '{}'",
+                name
+            ),
+        }),
+        other => diagnostics.push(ValidationDiagnostic {
+            function: Some(function.name.clone()),
+            block: Some(block.label.clone()),
+            message: format!(
+                "closure create expects first arg to be a PackEnv ptr register, got {:?}",
+                other
+            ),
+        }),
     }
 }
 
@@ -638,6 +686,87 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("duplicate register definition '%1'")));
+    }
+
+    #[test]
+    fn accepts_closure_create_with_pack_env_first_arg() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![ExternDecl {
+                symbol: "dx_rt_closure_create",
+                params: vec![Type::Ptr, Type::I64],
+                ret: Type::Ptr,
+            }],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![Param {
+                    name: "%0".into(),
+                    ty: Type::I64,
+                }],
+                ret: Type::Ptr,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![
+                        Instruction::PackEnv {
+                            result: "%1".into(),
+                            captures: vec![Operand::Register("%0".into(), Type::I64)],
+                        },
+                        Instruction::CallExtern {
+                            result: Some("%2".into()),
+                            symbol: "dx_rt_closure_create",
+                            ret: Type::Ptr,
+                            args: vec![
+                                Operand::Register("%1".into(), Type::Ptr),
+                                Operand::ConstInt(0),
+                            ],
+                            comment: None,
+                        },
+                    ],
+                    terminator: Terminator::Ret(Some(Operand::Register("%2".into(), Type::Ptr))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
+    }
+
+    #[test]
+    fn rejects_closure_create_without_pack_env_first_arg() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![ExternDecl {
+                symbol: "dx_rt_closure_create",
+                params: vec![Type::Ptr, Type::I64],
+                ret: Type::Ptr,
+            }],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![Param {
+                    name: "%0".into(),
+                    ty: Type::Ptr,
+                }],
+                ret: Type::Ptr,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![Instruction::CallExtern {
+                        result: Some("%1".into()),
+                        symbol: "dx_rt_closure_create",
+                        ret: Type::Ptr,
+                        args: vec![
+                            Operand::Register("%0".into(), Type::Ptr),
+                            Operand::ConstInt(0),
+                        ],
+                        comment: None,
+                    }],
+                    terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::Ptr))),
+                }],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("closure create expects first arg to be a PackEnv result")));
     }
 
     #[test]
