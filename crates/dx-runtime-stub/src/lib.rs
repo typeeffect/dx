@@ -40,9 +40,23 @@ struct Capture2F64 {
 }
 
 #[repr(C)]
+struct Capture3F64 {
+    a: f64,
+    b: f64,
+    c: f64,
+}
+
+#[repr(C)]
 struct Capture2I1 {
     a: bool,
     b: bool,
+}
+
+#[repr(C)]
+struct Capture3I1 {
+    a: bool,
+    b: bool,
+    c: bool,
 }
 
 #[repr(C)]
@@ -161,6 +175,12 @@ pub extern "C" fn dx_rt_closure_call_f64_1_f64(closure: ClosureHandle, arg0: f64
                 unsafe { std::mem::transmute(code_ptr) };
             fun(env.a, env.b, arg0)
         }
+        (false, 3) => {
+            let env = unsafe { &*(closure.env as *const Capture3F64) };
+            let fun: extern "C" fn(f64, f64, f64, f64) -> f64 =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, env.c, arg0)
+        }
         _ => 0.0,
     }
 }
@@ -186,6 +206,12 @@ pub extern "C" fn dx_rt_closure_call_i1_1_i1(closure: ClosureHandle, arg0: bool)
             let fun: extern "C" fn(bool, bool, bool) -> bool =
                 unsafe { std::mem::transmute(code_ptr) };
             fun(env.a, env.b, arg0)
+        }
+        (false, 3) => {
+            let env = unsafe { &*(closure.env as *const Capture3I1) };
+            let fun: extern "C" fn(bool, bool, bool, bool) -> bool =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, env.c, arg0)
         }
         _ => false,
     }
@@ -415,6 +441,12 @@ pub extern "C" fn dx_rt_thunk_call_f64(closure: ClosureHandle) -> f64 {
                     unsafe { std::mem::transmute(closure.code_ptr) };
                 fun(env.a, env.b)
             }
+            (false, 3) => {
+                let env = unsafe { &*(closure.env as *const Capture3F64) };
+                let fun: extern "C" fn(f64, f64, f64) -> f64 =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(env.a, env.b, env.c)
+            }
             _ => 0.0,
         };
     }
@@ -448,6 +480,12 @@ pub extern "C" fn dx_rt_thunk_call_i1(closure: ClosureHandle) -> bool {
                 let fun: extern "C" fn(bool, bool) -> bool =
                     unsafe { std::mem::transmute(closure.code_ptr) };
                 fun(env.a, env.b)
+            }
+            (false, 3) => {
+                let env = unsafe { &*(closure.env as *const Capture3I1) };
+                let fun: extern "C" fn(bool, bool, bool) -> bool =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(env.a, env.b, env.c)
             }
             _ => false,
         };
@@ -659,6 +697,14 @@ mod tests {
         c0 + c1
     }
 
+    extern "C" fn add_three_f64_captures(c0: f64, c1: f64, c2: f64, x: f64) -> f64 {
+        c0 + c1 + c2 + x
+    }
+
+    extern "C" fn sum_three_f64_captures(c0: f64, c1: f64, c2: f64) -> f64 {
+        c0 + c1 + c2
+    }
+
     extern "C" fn echo_i1(x: bool) -> bool {
         x
     }
@@ -673,6 +719,14 @@ mod tests {
 
     extern "C" fn xor_two_i1_thunk_captures(c0: bool, c1: bool) -> bool {
         c0 ^ c1
+    }
+
+    extern "C" fn xor_three_i1_captures(c0: bool, c1: bool, c2: bool, x: bool) -> bool {
+        c0 ^ c1 ^ c2 ^ x
+    }
+
+    extern "C" fn xor_three_i1_thunk_captures(c0: bool, c1: bool, c2: bool) -> bool {
+        c0 ^ c1 ^ c2
     }
 
     extern "C" fn echo_ptr(x: *mut c_void) -> *mut c_void {
@@ -874,6 +928,32 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_closure_f64_and_i1_calls_can_dispatch_with_three_captures() {
+        let env_f64 = Box::into_raw(Box::new(Capture3F64 {
+            a: 10.0,
+            b: 12.5,
+            c: 16.0,
+        })) as EnvHandle;
+        let env_i1 = Box::into_raw(Box::new(Capture3I1 {
+            a: true,
+            b: false,
+            c: true,
+        })) as EnvHandle;
+        let closure_f64 =
+            dx_rt_closure_create(add_three_f64_captures as *mut c_void, env_f64, 1, 3);
+        let closure_i1 =
+            dx_rt_closure_create(xor_three_i1_captures as *mut c_void, env_i1, 1, 3);
+
+        assert_eq!(dx_rt_closure_call_f64_1_f64(closure_f64, 3.5), 42.0);
+        assert!(dx_rt_closure_call_i1_1_i1(closure_i1, true));
+
+        free_closure(closure_f64);
+        free_closure(closure_i1);
+        free_env::<Capture3F64>(env_f64);
+        free_env::<Capture3I1>(env_i1);
+    }
+
+    #[test]
     fn closure_create_preserves_code_pointer() {
         let sentinel = 0x1234usize as *mut c_void;
         let handle = dx_rt_closure_create(sentinel, ptr::null_mut(), 1, 0);
@@ -1004,6 +1084,32 @@ mod tests {
 
         free_closure(thunk);
         free_env::<Capture3I64>(env);
+    }
+
+    #[test]
+    fn thunk_f64_and_i1_calls_can_dispatch_with_three_captures() {
+        let env_f64 = Box::into_raw(Box::new(Capture3F64 {
+            a: 10.0,
+            b: 11.0,
+            c: 21.0,
+        })) as EnvHandle;
+        let env_i1 = Box::into_raw(Box::new(Capture3I1 {
+            a: true,
+            b: false,
+            c: false,
+        })) as EnvHandle;
+        let thunk_f64 =
+            dx_rt_closure_create(sum_three_f64_captures as *mut c_void, env_f64, 0, 3);
+        let thunk_i1 =
+            dx_rt_closure_create(xor_three_i1_thunk_captures as *mut c_void, env_i1, 0, 3);
+
+        assert_eq!(dx_rt_thunk_call_f64(thunk_f64), 42.0);
+        assert!(dx_rt_thunk_call_i1(thunk_i1));
+
+        free_closure(thunk_f64);
+        free_closure(thunk_i1);
+        free_env::<Capture3F64>(env_f64);
+        free_env::<Capture3I1>(env_i1);
     }
 
     #[test]
