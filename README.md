@@ -7,6 +7,7 @@ Current focus:
 - small core language
 - explicit effects
 - Python interop as a foreign boundary
+- future compile-time schema providers for typed data sources
 - backend/toolchain convergence
 - first executable subset via `dx-llvm-ir` + `dx-runtime-stub`
 
@@ -60,6 +61,7 @@ Executable backend demo inputs:
 Primary design docs:
 
 - `docs/PY_INTEROP_ARCHITECTURE.md`
+- `docs/DX_SCHEMA_PROVIDER_PLAN.md`
 - `docs/DX_AD_PPL_DIRECTION.md`
 - `docs/DX_IMPLEMENTATION_ROADMAP.md`
 - `docs/DX_REAL_LLVM_BACKEND_PLAN.md`

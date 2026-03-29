@@ -12,6 +12,10 @@ The goal is:
 - Python interop as a first-class language feature
 - without polluting the `dx` compiler with Python language semantics
 
+This should stay distinct from compile-time schema providers for typed data sources.
+Python interop is the foreign boundary.
+Schema providers are a separate native typing feature.
+
 ## Product Model
 
 For the user, Python is first-class in `dx`.
@@ -25,6 +29,9 @@ That means `dx` should support:
 - diagnostics around Python boundary usage
 
 For the implementation, Python support is a dedicated subsystem, not the semantic core of the language.
+
+That means Python interop should not become the only path for typed datasource access.
+Where `dx` needs compile-time knowledge of external data shape, the preferred long-term direction is explicit schema artifacts, not hidden Python execution during compilation.
 
 ## Repository Split
 
@@ -126,3 +133,7 @@ That distinction is intentional and should be preserved.
 - merging the two compilers into one semantic engine
 - making Python the host runtime of `dx`
 - forcing a monorepo just because the product feature is first-class
+
+Related planned feature:
+
+- `docs/DX_SCHEMA_PROVIDER_PLAN.md`

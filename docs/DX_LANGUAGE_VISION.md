@@ -47,6 +47,8 @@ Short version:
 
 `dx` aims to be the best language for typed data applications.
 
+That direction should eventually include explicit compile-time schema providers for external data sources, so common data workflows do not have to collapse immediately into `PyObj`.
+
 ## Language Identity
 
 ### Core principles
@@ -59,6 +61,7 @@ Short version:
 - No source compatibility promise with Python
 - Strong interop with Python where useful
 - Result-first error handling with explicit `!throw` at foreign/runtime boundaries
+- Explicit schema acquisition for typed external data shapes, not implicit compile-time data loading
 
 ### What `dx` keeps from Python
 

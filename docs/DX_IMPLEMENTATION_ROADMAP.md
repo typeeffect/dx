@@ -50,6 +50,10 @@ The current implementation focus is:
 - stabilizing runtime ABI assumptions
 - preparing the transition from textual LLVM IR to LLVM toolchain integration
 
+The next major frontend-adjacent feature after backend execution stabilizes is:
+
+- compile-time schema providers for typed datasource metadata
+
 The current backend subset that is mechanically exercised through demo fixtures
 and audit tooling is documented in:
 
@@ -70,6 +74,10 @@ The intended pipeline is now:
 9. LLVM-like lowering (`dx-llvm`)
 10. real textual LLVM IR emission (`dx-llvm-ir`)
 11. LLVM toolchain integration
+
+Future extension planned after the executable backend baseline:
+
+12. explicit schema artifact acquisition for typed external data shapes
 
 ## Representation Roles
 
@@ -172,6 +180,20 @@ Purpose:
 - avoid early dependency on unstable or premature bindings
 
 This stage lives in `dx-llvm-ir`.
+
+### Compile-Time Schema Providers
+
+Purpose:
+
+- acquire external data shape metadata explicitly at compile time
+- keep typed datasource access native to `dx`
+- preserve reproducible builds through locked schema artifacts
+
+This feature is planned, not implemented.
+
+The current direction is documented in:
+
+- `docs/DX_SCHEMA_PROVIDER_PLAN.md`
 
 ## Milestones
 

@@ -39,18 +39,29 @@ The runtime side already includes:
 
 ## Current Executable Subset
 
-The most useful demo inputs live in:
+The current canonical demo set lives in `examples/backend/` and currently includes:
 
-- `examples/backend/arithmetic.dx`
-- `examples/backend/thunk.dx`
-- `examples/backend/closure_call_int.dx`
-- `examples/backend/closure_call_str.dx`
-- `examples/backend/closure_call_two_args.dx`
-- `examples/backend/match_nominal.dx`
+- `arithmetic.dx`
+- `thunk.dx`
+- `closure_call_int.dx`
+- `closure_call_str.dx`
+- `closure_call_two_args.dx`
+- `closure_call_ptr_ret_int_arg.dx`
+- `closure_call_ptr_ret_str_int_args.dx`
+- `closure_call_void_ret_three_args.dx`
+- `closure_call_float.dx`
+- `closure_call_bool.dx`
+- `match_nominal.dx`
+- `match_with_closure_call.dx`
+- `py_call_function.dx`
+- `py_call_method.dx`
+- `py_call_dynamic.dx`
+- `py_call_throw.dx`
 
 These demos are documented in:
 
 - `docs/DX_EXECUTABLE_DEMOS.md`
+- `docs/DX_TOOLCHAIN_PROVEN_SUBSET.md`
 
 ## Canonical Commands
 
@@ -84,6 +95,13 @@ This only works when LLVM tools are available locally.
 
 ```bash
 cargo run -q -p dx-llvm-ir --bin dx-plan-exec -- examples/backend/closure_call_int.dx
+```
+
+### Show Consolidated Backend Status
+
+```bash
+scripts/report_backend_status.sh
+scripts/report_backend_status.sh --json
 ```
 
 ### Show Runtime Stub Symbol Surface
@@ -123,6 +141,11 @@ has coherent:
 - LLVM IR emission
 - executable planning
 - runtime-stub symbol coverage
+
+The status script is the fastest way to export the same operational state as:
+
+- human-readable Markdown
+- machine-readable JSON
 
 ## What Is Still Missing
 

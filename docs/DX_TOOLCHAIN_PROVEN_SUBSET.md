@@ -26,10 +26,20 @@ The current canonical demos live in:
 
 - `examples/backend/arithmetic.dx`
 - `examples/backend/thunk.dx`
+- `examples/backend/closure_call_bool.dx`
+- `examples/backend/closure_call_float.dx`
 - `examples/backend/closure_call_int.dx`
+- `examples/backend/closure_call_ptr_ret_int_arg.dx`
+- `examples/backend/closure_call_ptr_ret_str_int_args.dx`
 - `examples/backend/closure_call_str.dx`
 - `examples/backend/closure_call_two_args.dx`
+- `examples/backend/closure_call_void_ret_three_args.dx`
 - `examples/backend/match_nominal.dx`
+- `examples/backend/match_with_closure_call.dx`
+- `examples/backend/py_call_dynamic.dx`
+- `examples/backend/py_call_function.dx`
+- `examples/backend/py_call_method.dx`
+- `examples/backend/py_call_throw.dx`
 
 ## Proven Operations
 
@@ -94,6 +104,29 @@ Proves:
 - runtime-stub coverage for:
   - `dx_rt_closure_call_i64_2_i64_i64`
 
+### Additional Ordinary Closure Call Shapes
+
+Demos:
+
+- `examples/backend/closure_call_ptr_ret_int_arg.dx`
+- `examples/backend/closure_call_ptr_ret_str_int_args.dx`
+- `examples/backend/closure_call_void_ret_three_args.dx`
+- `examples/backend/closure_call_float.dx`
+- `examples/backend/closure_call_bool.dx`
+
+Proves:
+
+- pointer-returning closure paths with integer and mixed arguments
+- `void`-returning closure call symbol emission
+- `f64` ordinary closure-call ABI coverage
+- `i1` ordinary closure-call ABI coverage
+- runtime-stub coverage for:
+  - `dx_rt_closure_call_ptr_1_i64`
+  - `dx_rt_closure_call_ptr_2_ptr_i64`
+  - `dx_rt_closure_call_void_3_i64_ptr_i1`
+  - `dx_rt_closure_call_f64_1_f64`
+  - `dx_rt_closure_call_i1_1_i1`
+
 ### Nominal Match
 
 Demo:
@@ -105,6 +138,28 @@ Proves:
 - `match` is lowered before `dx-llvm-ir`
 - `dx_rt_match_tag` is visible in emitted IR
 - the executable subset supports nominal tag checking for this narrow case
+
+Additional mixed demo:
+
+- `examples/backend/match_with_closure_call.dx`
+
+This proves the validated backend path now accepts the current slot-backed branch-local pattern used by the lowering model.
+
+### Python Boundary Demos
+
+Demos:
+
+- `examples/backend/py_call_function.dx`
+- `examples/backend/py_call_method.dx`
+- `examples/backend/py_call_dynamic.dx`
+- `examples/backend/py_call_throw.dx`
+
+Proves:
+
+- Python function-call lowering
+- Python method-call lowering
+- Python dynamic-call lowering
+- Python `!throw` boundary visibility in the canonical backend workflow
 
 ## Audit Command
 
@@ -126,6 +181,13 @@ This audit checks:
 - executable planning success
 - expected symbols in emitted IR
 - expected symbol presence in `dx-runtime-stub`
+
+Operational status entrypoint:
+
+```bash
+scripts/report_backend_status.sh
+scripts/report_backend_status.sh --json
+```
 
 ## Current Limits
 
