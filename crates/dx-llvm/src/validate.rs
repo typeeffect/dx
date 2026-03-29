@@ -89,14 +89,14 @@ fn validate_function(
     let mut register_types = HashMap::new();
     let mut pack_env_registers = BTreeSet::new();
     let mut block_index = HashMap::new();
-    let mut reg_defs = HashMap::new();
+    let mut reg_defs: HashMap<String, Vec<DefSite>> = HashMap::new();
     for (idx, block) in function.blocks.iter().enumerate() {
         block_index.insert(block.label.clone(), idx);
     }
     for param in &function.params {
         defined_registers.insert(param.name.clone());
         register_types.insert(param.name.clone(), param.ty.clone());
-        reg_defs.insert(param.name.clone(), DefSite::Param);
+        reg_defs.insert(param.name.clone(), vec![DefSite::Param]);
     }
 
     for (block_id, block) in function.blocks.iter().enumerate() {
@@ -108,38 +108,44 @@ fn validate_function(
                         _ => unreachable!(),
                     };
                     register_types.insert(result.clone(), ty);
-                    reg_defs.insert(
-                        result.clone(),
-                        DefSite::Instruction {
-                            block: block_id,
-                            index: instr_index,
-                        },
-                    );
-                    if !defined_registers.insert(result.clone()) {
+                    let def_site = DefSite::Instruction {
+                        block: block_id,
+                        index: instr_index,
+                    };
+                    let defs = reg_defs.entry(result.clone()).or_default();
+                    if defs.iter().any(|site| match site {
+                        DefSite::Param => true,
+                        DefSite::Instruction { block, .. } => *block == block_id,
+                    }) {
                         diagnostics.push(ValidationDiagnostic {
                             function: Some(function.name.clone()),
                             block: Some(block.label.clone()),
                             message: format!("duplicate register definition '{}'", result),
                         });
                     }
+                    defs.push(def_site);
+                    defined_registers.insert(result.clone());
                 }
                 Instruction::PackEnv { result, .. } => {
                     pack_env_registers.insert(result.clone());
                     register_types.insert(result.clone(), Type::Ptr);
-                    reg_defs.insert(
-                        result.clone(),
-                        DefSite::Instruction {
-                            block: block_id,
-                            index: instr_index,
-                        },
-                    );
-                    if !defined_registers.insert(result.clone()) {
+                    let def_site = DefSite::Instruction {
+                        block: block_id,
+                        index: instr_index,
+                    };
+                    let defs = reg_defs.entry(result.clone()).or_default();
+                    if defs.iter().any(|site| match site {
+                        DefSite::Param => true,
+                        DefSite::Instruction { block, .. } => *block == block_id,
+                    }) {
                         diagnostics.push(ValidationDiagnostic {
                             function: Some(function.name.clone()),
                             block: Some(block.label.clone()),
                             message: format!("duplicate register definition '{}'", result),
                         });
                     }
+                    defs.push(def_site);
+                    defined_registers.insert(result.clone());
                 }
                 Instruction::CallExtern { result, .. } => {
                     if let Some(result) = result {
@@ -148,20 +154,23 @@ fn validate_function(
                             _ => unreachable!(),
                         };
                         register_types.insert(result.clone(), ret);
-                        reg_defs.insert(
-                            result.clone(),
-                            DefSite::Instruction {
-                                block: block_id,
-                                index: instr_index,
-                            },
-                        );
-                        if !defined_registers.insert(result.clone()) {
+                        let def_site = DefSite::Instruction {
+                            block: block_id,
+                            index: instr_index,
+                        };
+                        let defs = reg_defs.entry(result.clone()).or_default();
+                        if defs.iter().any(|site| match site {
+                            DefSite::Param => true,
+                            DefSite::Instruction { block, .. } => *block == block_id,
+                        }) {
                             diagnostics.push(ValidationDiagnostic {
                                 function: Some(function.name.clone()),
                                 block: Some(block.label.clone()),
                                 message: format!("duplicate register definition '{}'", result),
                             });
                         }
+                        defs.push(def_site);
+                        defined_registers.insert(result.clone());
                     }
                 }
             }
@@ -557,7 +566,7 @@ fn validate_operand_defined(
     operand: &Operand,
     defined_registers: &BTreeSet<String>,
     register_types: &HashMap<String, Type>,
-    reg_defs: &HashMap<String, DefSite>,
+    reg_defs: &HashMap<String, Vec<DefSite>>,
     dominators: &[BTreeSet<usize>],
     current_block: usize,
     current_instr: Option<usize>,
@@ -585,16 +594,51 @@ fn validate_operand_defined(
                     ),
                 });
             }
-            if let Some(def_site) = reg_defs.get(name) {
-                if !register_available_at_use(*def_site, dominators, current_block, current_instr) {
-                    diagnostics.push(ValidationDiagnostic {
-                        function: Some(function.name.clone()),
-                        block: Some(block.label.clone()),
-                        message: format!(
-                            "register '{}' is not available at this use site",
-                            name
-                        ),
-                    });
+            if let Some(def_sites) = reg_defs.get(name) {
+                if def_sites.len() == 1 {
+                    if !register_available_at_use(
+                        def_sites[0],
+                        dominators,
+                        current_block,
+                        current_instr,
+                    ) {
+                        diagnostics.push(ValidationDiagnostic {
+                            function: Some(function.name.clone()),
+                            block: Some(block.label.clone()),
+                            message: format!(
+                                "register '{}' is not available at this use site",
+                                name
+                            ),
+                        });
+                    }
+                } else {
+                    let distinct_blocks: BTreeSet<Option<usize>> = def_sites
+                        .iter()
+                        .map(|site| match site {
+                            DefSite::Param => None,
+                            DefSite::Instruction { block, .. } => Some(*block),
+                        })
+                        .collect();
+                    if distinct_blocks.len() == 1 {
+                        let any_available = def_sites.iter().any(|site| {
+                            register_available_at_use(
+                                *site,
+                                dominators,
+                                current_block,
+                                current_instr,
+                            )
+                        });
+                        if !any_available {
+                            diagnostics.push(ValidationDiagnostic {
+                                function: Some(function.name.clone()),
+                                block: Some(block.label.clone()),
+                                message: format!(
+                                    "register '{}' is not available at this use site",
+                                    name
+                                ),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -665,7 +709,7 @@ fn validate_terminator(
     block_labels: &BTreeSet<String>,
     defined_registers: &BTreeSet<String>,
     register_types: &HashMap<String, Type>,
-    reg_defs: &HashMap<String, DefSite>,
+    reg_defs: &HashMap<String, Vec<DefSite>>,
     dominators: &[BTreeSet<usize>],
     current_block: usize,
     global_symbols: &BTreeSet<String>,
@@ -999,6 +1043,58 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("register '%1' is not available at this use site")));
+    }
+
+    #[test]
+    fn accepts_slot_backed_local_redefinitions_across_branches() {
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![Param {
+                    name: "%0".into(),
+                    ty: Type::I1,
+                }],
+                ret: Type::I64,
+                blocks: vec![
+                    Block {
+                        label: "bb0".into(),
+                        instructions: vec![],
+                        terminator: Terminator::CondBr {
+                            cond: Operand::Register("%0".into(), Type::I1),
+                            then_label: "bb1".into(),
+                            else_label: "bb2".into(),
+                        },
+                    },
+                    Block {
+                        label: "bb1".into(),
+                        instructions: vec![Instruction::Assign {
+                            result: "%1".into(),
+                            ty: Type::I64,
+                            value: Operand::ConstInt(1),
+                        }],
+                        terminator: Terminator::Br("bb3".into()),
+                    },
+                    Block {
+                        label: "bb2".into(),
+                        instructions: vec![Instruction::Assign {
+                            result: "%1".into(),
+                            ty: Type::I64,
+                            value: Operand::ConstInt(2),
+                        }],
+                        terminator: Terminator::Br("bb3".into()),
+                    },
+                    Block {
+                        label: "bb3".into(),
+                        instructions: vec![],
+                        terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::I64))),
+                    },
+                ],
+            }],
+        };
+        let report = validate_module(&module);
+        assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
     }
 
     #[test]
