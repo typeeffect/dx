@@ -6,9 +6,9 @@ Current focus:
 
 - small core language
 - explicit effects
-- deterministic memory direction
 - Python interop as a foreign boundary
-- query/transform/orchestration as the killer-app direction
+- backend/toolchain convergence
+- first executable subset via `dx-llvm-ir` + `dx-runtime-stub`
 
 ## Layout
 
@@ -24,6 +24,7 @@ Current focus:
   - v0.1 core spec
 - `examples/`
   - long-form design validation examples
+  - backend executable demos
 - `compiler/`
   - parser, AST, checker, lowering work
 - `runtime/`
@@ -31,31 +32,34 @@ Current focus:
 
 ## Current Status
 
-This repository is a clean bootstrap for serious `dx` language development.
+This repository has moved well beyond the parser/bootstrap stage.
 
-The immediate implementation target is:
+The current implementation target is:
 
-1. parser
-2. AST
-3. basic type checker
-4. effect checker
-5. Python foreign boundary
-6. then query/runtime work on top of the stabilized core
+1. keep the frontend/type/effect core stable
+2. complete the real LLVM IR backend subset
+3. connect that backend to LLVM tool verification
+4. grow the executable path around `dx-runtime-stub`
 
 ## First Milestone
 
-Implement the v0.1 core described in:
+The v0.1 core still starts from:
 
 - `spec/DX_V0_1_SPEC.md`
 
-and validate it against:
+Long-form language validation examples:
 
 - `examples/DX_LONG_EXAMPLES.md`
 
-See also:
+Executable backend demo inputs:
+
+- `docs/DX_EXECUTABLE_DEMOS.md`
+- `docs/DX_EXECUTION_WORKFLOW.md`
+
+Primary design docs:
 
 - `docs/PY_INTEROP_ARCHITECTURE.md`
 - `docs/DX_AD_PPL_DIRECTION.md`
 - `docs/DX_IMPLEMENTATION_ROADMAP.md`
-- `docs/PARALLEL_DEVELOPMENT_PLAN.md`
-- `docs/DX_HIR_PLAN.md`
+- `docs/DX_REAL_LLVM_BACKEND_PLAN.md`
+- `docs/DX_LLVM_TOOLCHAIN_PLAN.md`
