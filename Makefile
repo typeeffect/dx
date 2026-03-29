@@ -1,4 +1,15 @@
-.PHONY: demo-emit demo-verify demo-plan runtime-stub-info runtime-stub-plan runtime-stub-build-plan
+.PHONY: \
+	demo-emit \
+	demo-verify \
+	demo-plan \
+	demo-build \
+	demo-build-verify \
+	prove-subset \
+	prove-subset-verify \
+	prove-subset-dry-run \
+	runtime-stub-info \
+	runtime-stub-plan \
+	runtime-stub-build-plan
 
 DEMO ?= examples/backend/closure_call_int.dx
 BUILD_DIR ?= build
@@ -17,6 +28,21 @@ demo-verify:
 
 demo-plan:
 	cargo run -q -p dx-llvm-ir --bin dx-plan-exec -- $(DEMO) $(BUILD_DIR)
+
+demo-build:
+	scripts/build_backend_demo.sh $(DEMO) $(BUILD_DIR)
+
+demo-build-verify:
+	scripts/build_backend_demo.sh --verify $(DEMO) $(BUILD_DIR)
+
+prove-subset:
+	scripts/prove_backend_subset.sh
+
+prove-subset-verify:
+	scripts/prove_backend_subset.sh --verify
+
+prove-subset-dry-run:
+	scripts/prove_backend_subset.sh --dry-run
 
 runtime-stub-info:
 	cargo run -q -p dx-runtime-stub --bin dx-runtime-stub-info
