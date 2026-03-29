@@ -216,6 +216,9 @@ All executable-entry demos are now runnable:
 - `examples/backend/main_returns_zero.dx` (exit code 0)
 - `examples/backend/main_arithmetic.dx` (exit code 42)
 - `examples/backend/main_closure_call_int.dx` (exit code 42)
+- `examples/backend/main_closure_call_subtract.dx` (exit code 42)
+- `examples/backend/main_closure_call_two_args.dx` (exit code 42)
+- `examples/backend/main_thunk_arithmetic.dx` (exit code 42)
 - `examples/backend/main_thunk_capture.dx` (exit code 42)
 
 The runnable subset now equals the full executable-entry subset.
@@ -227,11 +230,11 @@ This subset is intentionally narrow.
 
 It still does not prove:
 
-- rich runtime semantics for ordinary closure calls
+- multi-capture ordinary-closure runtime semantics
 - Python execution
 - full ADT payload extraction
-- general executable correctness under a real LLVM toolchain
 - full non-stub runtime behavior
+- widened executable-program semantics beyond the current `main() -> Int`
 
 ## Why This Matters
 

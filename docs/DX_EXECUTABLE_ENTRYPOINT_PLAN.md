@@ -49,10 +49,16 @@ There is now also a canonical proof workflow for the currently runnable subset:
 scripts/prove_executable_entry_subset.sh
 ```
 
-At the moment, that runnable subset is narrower than the full executable-entry
-fixture set. Pure `main() -> Int` demos already run end-to-end; executable
-fixtures that rely on ordinary closure-call or thunk runtime semantics still
-depend on a richer runtime than the current stub.
+Today, the runnable subset already equals the current executable-entry fixture
+set. The canonical runnable demos are:
+
+- `main_returns_zero.dx` (exit code 0)
+- `main_arithmetic.dx` (exit code 42)
+- `main_closure_call_int.dx` (exit code 42)
+- `main_closure_call_subtract.dx` (exit code 42)
+- `main_closure_call_two_args.dx` (exit code 42)
+- `main_thunk_arithmetic.dx` (exit code 42)
+- `main_thunk_capture.dx` (exit code 42)
 
 ## Important Constraint
 
@@ -116,16 +122,13 @@ native executable contract is in place.
 
 ## Next Step
 
-The next backend-executable milestone should use this narrow contract:
+The current backend-executable milestone has already proved this narrow
+contract. The next work should keep this contract stable while widening what is
+possible behind it:
 
-- prove `fun main() -> Int` end-to-end
-- add canonical executable-entry demos outside the current backend subset only
-  when the workflow around `dx-build-exec` is stable
-- distinguish clearly between:
-  - executable-entry fixtures that satisfy the entrypoint contract
-  - runnable executable-entry fixtures that already execute correctly with the
-    current runtime stub
-- later decide how to widen entrypoint semantics
+- extend runnable coverage to richer runtime shapes
+- keep the executable-entry fixture set and runnable subset aligned
+- only later decide how to widen entrypoint semantics
 
 ## Widening Options Later
 

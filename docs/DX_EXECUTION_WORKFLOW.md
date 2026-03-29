@@ -64,6 +64,9 @@ Within that broader backend set, the current executable-entry fixtures are:
 - `main_returns_zero.dx`
 - `main_arithmetic.dx`
 - `main_closure_call_int.dx`
+- `main_closure_call_subtract.dx`
+- `main_closure_call_two_args.dx`
+- `main_thunk_arithmetic.dx`
 - `main_thunk_capture.dx`
 
 All executable-entry demos are now runnable with the current runtime stub:
@@ -71,6 +74,9 @@ All executable-entry demos are now runnable with the current runtime stub:
 - `main_returns_zero.dx` (exit code 0)
 - `main_arithmetic.dx` (exit code 42)
 - `main_closure_call_int.dx` (exit code 42)
+- `main_closure_call_subtract.dx` (exit code 42)
+- `main_closure_call_two_args.dx` (exit code 42)
+- `main_thunk_arithmetic.dx` (exit code 42)
 - `main_thunk_capture.dx` (exit code 42)
 
 These demos are documented in:
@@ -213,6 +219,9 @@ All executable-entry demos are now runnable:
 - `main_returns_zero.dx` (exit code 0)
 - `main_arithmetic.dx` (exit code 42)
 - `main_closure_call_int.dx` (exit code 42)
+- `main_closure_call_subtract.dx` (exit code 42)
+- `main_closure_call_two_args.dx` (exit code 42)
+- `main_thunk_arithmetic.dx` (exit code 42)
 - `main_thunk_capture.dx` (exit code 42)
 
 The runnable subset now equals the full executable-entry subset.
@@ -221,9 +230,10 @@ The runnable subset now equals the full executable-entry subset.
 
 Major remaining steps:
 
-- ordinary closure-call runtime dispatch (the Milestone C blocker)
-- broader runtime implementation beyond stubs
+- broader runtime implementation beyond the current stub
+- richer closure env/runtime shapes beyond the current runnable subset
 - richer match/value flow beyond nominal tag checks
+- deciding how to widen executable-program semantics beyond `main() -> Int`
 
 ## Success Criterion For This Phase
 

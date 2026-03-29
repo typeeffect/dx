@@ -45,10 +45,10 @@ It is now in backend execution mode.
 
 The current implementation focus is:
 
-- expanding the real emitter where it is mechanically safe
-- strengthening backend invariants and validation
-- stabilizing runtime ABI assumptions
-- preparing the transition from textual LLVM IR to LLVM toolchain integration
+- keeping the closed backend/toolchain baseline stable
+- expanding the runnable executable subset beyond the first native baseline
+- evolving runtime semantics beyond the current stub where that unlocks real execution
+- preparing the next language-facing feature wave after backend milestones A/B/C
 
 The next major frontend-adjacent feature after backend execution stabilizes is:
 
@@ -67,10 +67,11 @@ The current proof workflow for the runnable executable-entry subset is:
 
 - `scripts/prove_executable_entry_subset.sh`
 
-The next concrete runtime blocker after the current runnable subset is:
+The next concrete runtime-expansion targets after the current runnable subset are:
 
-- explicit ordinary-closure dispatch, documented in
-  `docs/DX_CLOSURE_DISPATCH_PLAN.md`
+- multi-capture ordinary-closure dispatch
+- richer runtime env shapes beyond the current single-capture cases
+- less-stub Python and match runtime semantics
 
 ## Compiler Pipeline
 
@@ -94,12 +95,11 @@ Future extension planned after the executable backend baseline:
 
 Immediate executable-path constraint:
 
-- the first stable native executable contract is currently `fun main() -> Int`
-- the first runnable executable subset is currently narrower than the broader
-  executable-entry fixture set, because ordinary closure/thunk runtime hooks are
-  still semantic stubs
-- the next executable-runtime milestone is to make ordinary `closure_call_*`
-  dispatch semantically runnable, not just ABI-correct
+- the stable native executable contract is currently `fun main() -> Int`
+- the current executable-entry fixture set is fully runnable under the current
+  runtime stub
+- the next executable-runtime work is to expand that runnable subset to richer
+  closure/env/runtime shapes without widening the entrypoint contract yet
 
 ## Representation Roles
 
@@ -436,7 +436,7 @@ Exit criteria:
 
 Status:
 
-- in progress, but already supports a serious subset
+- complete for the current supported backend subset
 
 Goal:
 
@@ -448,14 +448,15 @@ Currently supported:
 - string globals
 - `Unit -> ret void`
 - thunk runtime path
+- ordinary closure-call runtime path for the current supported ABI shapes
 - Python runtime calls:
   - function
   - method
   - dynamic
 
-Current unsupported boundary:
+Current narrow boundary:
 
-- `match`
+- richer `match` payload/value-flow semantics beyond the current nominal lowering
 
 Exit criteria:
 
@@ -540,8 +541,11 @@ Related backend plans:
 **Status: closed for the current executable-entry subset.**
 
 All executable-entry demos are now runnable: `main_returns_zero.dx`,
-`main_arithmetic.dx`, `main_closure_call_int.dx`, `main_thunk_capture.dx`.
-Ordinary closure-call dispatch is operational through the runtime stub.
+`main_arithmetic.dx`, `main_closure_call_int.dx`,
+`main_closure_call_subtract.dx`, `main_closure_call_two_args.dx`,
+`main_thunk_arithmetic.dx`, `main_thunk_capture.dx`.
+Ordinary closure-call dispatch is operational through the runtime stub for the
+currently supported shapes.
 
 Goal:
 
@@ -571,6 +575,64 @@ Exit criteria:
 Reference plan:
 
 - `docs/DX_RUNTIME_STUB_PLAN.md`
+
+## Post-Baseline Roadmap
+
+With backend milestones A, B, and C closed for the current scope, the next
+implementation wave should be organized around three follow-on milestones.
+
+### Post-Baseline Milestone D: Expand Runnable Runtime Semantics
+
+Goal:
+
+- move from the current runnable baseline to richer executable semantics without
+  destabilizing the working `main() -> Int` contract
+
+Focus:
+
+- multi-capture ordinary closures
+- richer env type combinations
+- additional end-to-end runnable fixtures for already-supported ABI shapes
+- narrower, more truthful limits around what is still stubbed
+
+Exit criteria:
+
+- richer closure/env shapes run end to end through `dx-run-exec`
+- runnable fixtures stay aligned with manifests, scripts, and docs
+
+### Post-Baseline Milestone E: Widen the Executable Program Model
+
+Goal:
+
+- define the next stable executable contract after the initial `main() -> Int`
+  baseline
+
+Focus:
+
+- explicit decision on `main() -> Unit`
+- possible runtime wrapper instead of exposing `@main` directly
+- future argument/environment handling
+
+Exit criteria:
+
+- executable-program semantics are documented and enforced beyond the initial
+  narrow contract
+
+### Post-Baseline Milestone F: Compile-Time Schema Providers
+
+Goal:
+
+- start the first real language-facing feature wave after backend closure
+
+Focus:
+
+- locked `.dxschema` artifacts
+- explicit compile-time schema acquisition
+- typed datasource shape integration with the existing type/effect core
+
+Reference plan:
+
+- `docs/DX_SCHEMA_PROVIDER_PLAN.md`
 
 Exit criteria:
 

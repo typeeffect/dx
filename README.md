@@ -8,8 +8,9 @@ Current focus:
 - explicit effects
 - Python interop as a foreign boundary
 - future compile-time schema providers for typed data sources
-- backend/toolchain convergence
-- first executable subset via `dx-llvm-ir` + `dx-runtime-stub`
+- executable-subset expansion beyond the first native baseline
+- runtime-semantics expansion beyond the current stub
+- post-bootstrap roadmap after backend/toolchain closure
 
 ## Layout
 
@@ -38,9 +39,9 @@ This repository has moved well beyond the parser/bootstrap stage.
 The current implementation target is:
 
 1. keep the frontend/type/effect core stable
-2. complete the real LLVM IR backend subset
-3. connect that backend to LLVM tool verification
-4. grow the executable path around `dx-runtime-stub`
+2. keep the backend/toolchain baseline stable
+3. expand the runnable executable subset around `dx-runtime-stub`
+4. prepare the next language-facing feature wave after A/B/C
 
 ## First Milestone
 
