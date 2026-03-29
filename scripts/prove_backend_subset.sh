@@ -60,6 +60,8 @@ if [[ -n "$VERIFY_FLAG" ]]; then
 fi
 
 if [[ $DRY_RUN_ONLY -eq 1 ]]; then
+  printf '%q ' "$ROOT_DIR/scripts/check_backend_toolchain.sh"
+  printf '\n'
   printf '%q ' "${audit_cmd[@]}"
   printf '\n'
   for demo in "${DEMOS[@]}"; do
@@ -70,6 +72,10 @@ if [[ $DRY_RUN_ONLY -eq 1 ]]; then
   exit 0
 fi
 
+echo "==> backend toolchain preflight"
+"$ROOT_DIR/scripts/check_backend_toolchain.sh"
+
+echo
 echo "==> audit backend demos"
 "${audit_cmd[@]}"
 

@@ -4,10 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERIFY_FLAG=""
 DRY_RUN=0
+SKIP_PREFLIGHT=0
 
 usage() {
   cat <<'EOF'
-usage: scripts/build_backend_demo.sh [--verify] [--dry-run] <input.dx> [build-dir]
+usage: scripts/build_backend_demo.sh [--verify] [--dry-run] [--skip-preflight] <input.dx> [build-dir]
 
 Build flow:
   1. cargo build -p dx-runtime-stub
@@ -17,6 +18,7 @@ Build flow:
 Options:
   --verify   ask dx-emit-llvm to verify with LLVM tools during emission
   --dry-run  print the commands without executing them
+  --skip-preflight  skip `check_backend_toolchain.sh --strict`
 EOF
 }
 
@@ -28,6 +30,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --skip-preflight)
+      SKIP_PREFLIGHT=1
       shift
       ;;
     -h|--help)
@@ -87,10 +93,12 @@ if [[ $DRY_RUN -eq 1 ]]; then
   exit 0
 fi
 
+if [[ $SKIP_PREFLIGHT -eq 0 ]]; then
+  echo "==> backend toolchain preflight"
+  "$ROOT_DIR/scripts/check_backend_toolchain.sh" --strict
+fi
+
 require_tool cargo
-require_tool cc
-require_tool llvm-as
-require_tool llc
 
 echo "==> building runtime stub"
 (
