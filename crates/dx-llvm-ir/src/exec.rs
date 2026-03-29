@@ -1,6 +1,7 @@
 use crate::link::{build_link_command_plan, LinkCommandPlan};
 use crate::pipeline::{emit_file_to_path, emit_file_to_path_and_verify, PipelineError};
 use crate::toolchain::{LlvmToolchain, ToolchainError};
+use dx_parser::{Item, Lexer, Parser};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -222,6 +223,7 @@ pub fn materialize_source_executable_plan(
     if let Some(parent) = plan.executable.ll_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    ensure_source_executable_entrypoint_contract(&plan.input_dx)?;
     emit_file_to_path(&plan.input_dx, &plan.executable.ll_path)?;
     ensure_minimal_executable_entrypoint(&plan.executable.ll_path)?;
     execute_link_plan(&plan.executable.link_plan, tools)
@@ -234,6 +236,7 @@ pub fn materialize_verified_executable_plan(
     if let Some(parent) = plan.source.executable.ll_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    ensure_source_executable_entrypoint_contract(&plan.source.input_dx)?;
     emit_file_to_path_and_verify(&plan.source.input_dx, &plan.source.executable.ll_path)?;
     ensure_minimal_executable_entrypoint(&plan.source.executable.ll_path)?;
     execute_link_plan(&plan.source.executable.link_plan, tools)
@@ -351,6 +354,29 @@ fn ensure_minimal_executable_entrypoint(ll_path: &Path) -> Result<(), Executable
     Err(ExecutableBuildError::InvalidEntrypoint(
         "expected top-level zero-arg `main` returning `Int`",
     ))
+}
+
+fn ensure_source_executable_entrypoint_contract(
+    input_dx: &Path,
+) -> Result<(), ExecutableBuildError> {
+    let src = std::fs::read_to_string(input_dx)?;
+    let tokens = Lexer::new(&src).tokenize();
+    let mut parser = Parser::new(tokens);
+    let ast = parser
+        .parse_module()
+        .map_err(|err| ExecutableBuildError::Pipeline(PipelineError::Parse(err.message)))?;
+
+    for item in ast.items {
+        if let Item::Function(function) = item {
+            if function.name == "main" && !function.effects.is_empty() {
+                return Err(ExecutableBuildError::InvalidEntrypoint(
+                    "effectful `main` is outside the current executable contract",
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn find_tool_with_env<F, G>(env_key: &str, name: &str, get_var: F, split_paths_fn: G) -> Option<PathBuf>
@@ -702,6 +728,32 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "invalid executable entrypoint: expected top-level zero-arg `main` returning `Int`"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn accepts_source_main_without_effects() {
+        let base = temp_dir();
+        let source = temp_source(&base, "main.dx", "fun main() -> Int:\n    0\n.\n");
+
+        ensure_source_executable_entrypoint_contract(&source).expect("source contract");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rejects_effectful_source_main_entrypoint() {
+        let base = temp_dir();
+        let source = temp_source(&base, "main.dx", "fun main() -> Int !io:\n    0\n.\n");
+
+        let err =
+            ensure_source_executable_entrypoint_contract(&source).expect_err("should reject");
+
+        assert_eq!(
+            err.to_string(),
+            "invalid executable entrypoint: effectful `main` is outside the current executable contract"
         );
 
         let _ = fs::remove_dir_all(&base);
