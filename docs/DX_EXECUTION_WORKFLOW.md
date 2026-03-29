@@ -54,6 +54,18 @@ These demos are documented in:
 
 ## Canonical Commands
 
+### Audit The Demo Subset
+
+```bash
+scripts/audit_backend_demos.sh
+```
+
+When local LLVM tools are available, the same audit can force verification:
+
+```bash
+scripts/audit_backend_demos.sh --verify
+```
+
 ### Emit LLVM IR
 
 ```bash
@@ -104,6 +116,13 @@ make runtime-stub-info
 make runtime-stub-plan
 make runtime-stub-build-plan
 ```
+
+The audit script is the fastest way to check that the current demo subset still
+has coherent:
+
+- LLVM IR emission
+- executable planning
+- runtime-stub symbol coverage
 
 ## What Is Still Missing
 

@@ -91,6 +91,18 @@ Behavior:
 
 ## Suggested Commands
 
+Audit the whole demo set in one pass:
+
+```bash
+scripts/audit_backend_demos.sh
+```
+
+If LLVM tools are installed locally:
+
+```bash
+scripts/audit_backend_demos.sh --verify
+```
+
 Or use the top-level `Makefile` shortcuts:
 
 ```bash
