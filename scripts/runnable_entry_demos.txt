@@ -1,2 +1,3 @@
 main_arithmetic
+main_thunk_capture
 main_returns_zero

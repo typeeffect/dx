@@ -23,6 +23,17 @@ struct StubTaggedValue {
     tag: Utf8Ptr,
 }
 
+fn closure_env_ptr<T>(closure: ClosureHandle) -> Option<*const T> {
+    if closure.is_null() {
+        return None;
+    }
+    let closure = unsafe { &*(closure as *const StubClosure) };
+    if closure.env.is_null() {
+        return None;
+    }
+    Some(closure.env as *const T)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_closure_create(env: EnvHandle, arity: u32) -> ClosureHandle {
     let closure = Box::new(StubClosure { env, arity });
@@ -56,23 +67,31 @@ closure_call_stub!(dx_rt_closure_call_ptr_2_ptr_i64(arg0: *mut c_void, arg1: i64
 closure_call_stub_void!(dx_rt_closure_call_void_3_i64_ptr_i1(arg0: i64, arg1: *mut c_void, arg2: bool));
 
 #[unsafe(no_mangle)]
-pub extern "C" fn dx_rt_thunk_call_i64(_closure: ClosureHandle) -> i64 {
-    0
+pub extern "C" fn dx_rt_thunk_call_i64(closure: ClosureHandle) -> i64 {
+    closure_env_ptr::<i64>(closure)
+        .map(|ptr| unsafe { *ptr })
+        .unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn dx_rt_thunk_call_f64(_closure: ClosureHandle) -> f64 {
-    0.0
+pub extern "C" fn dx_rt_thunk_call_f64(closure: ClosureHandle) -> f64 {
+    closure_env_ptr::<f64>(closure)
+        .map(|ptr| unsafe { *ptr })
+        .unwrap_or(0.0)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn dx_rt_thunk_call_i1(_closure: ClosureHandle) -> bool {
-    false
+pub extern "C" fn dx_rt_thunk_call_i1(closure: ClosureHandle) -> bool {
+    closure_env_ptr::<bool>(closure)
+        .map(|ptr| unsafe { *ptr })
+        .unwrap_or(false)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn dx_rt_thunk_call_ptr(_closure: ClosureHandle) -> *mut c_void {
-    ptr::null_mut()
+pub extern "C" fn dx_rt_thunk_call_ptr(closure: ClosureHandle) -> *mut c_void {
+    closure_env_ptr::<*mut c_void>(closure)
+        .map(|ptr| unsafe { *ptr })
+        .unwrap_or(ptr::null_mut())
 }
 
 #[unsafe(no_mangle)]
@@ -129,6 +148,14 @@ mod tests {
         }
     }
 
+    fn free_env<T>(env: EnvHandle) {
+        if !env.is_null() {
+            unsafe {
+                drop(Box::from_raw(env as *mut T));
+            }
+        }
+    }
+
     fn tagged_value(tag: &CString) -> *mut c_void {
         Box::into_raw(Box::new(StubTaggedValue { tag: tag.as_ptr() })) as *mut c_void
     }
@@ -157,6 +184,37 @@ mod tests {
         assert!(dx_rt_thunk_call_ptr(handle).is_null());
         dx_rt_thunk_call_void(handle);
         free_closure(handle);
+    }
+
+    #[test]
+    fn thunk_calls_can_read_captured_env_values() {
+        let env_i64 = Box::into_raw(Box::new(42_i64)) as EnvHandle;
+        let env_f64 = Box::into_raw(Box::new(3.5_f64)) as EnvHandle;
+        let env_i1 = Box::into_raw(Box::new(true)) as EnvHandle;
+        let payload = Box::into_raw(Box::new(123_i64)) as *mut c_void;
+        let env_ptr = Box::into_raw(Box::new(payload)) as EnvHandle;
+
+        let thunk_i64 = dx_rt_closure_create(env_i64, 0);
+        let thunk_f64 = dx_rt_closure_create(env_f64, 0);
+        let thunk_i1 = dx_rt_closure_create(env_i1, 0);
+        let thunk_ptr = dx_rt_closure_create(env_ptr, 0);
+
+        assert_eq!(dx_rt_thunk_call_i64(thunk_i64), 42);
+        assert_eq!(dx_rt_thunk_call_f64(thunk_f64), 3.5);
+        assert!(dx_rt_thunk_call_i1(thunk_i1));
+        assert_eq!(dx_rt_thunk_call_ptr(thunk_ptr), payload);
+
+        free_closure(thunk_i64);
+        free_closure(thunk_f64);
+        free_closure(thunk_i1);
+        free_closure(thunk_ptr);
+        free_env::<i64>(env_i64);
+        free_env::<f64>(env_f64);
+        free_env::<bool>(env_i1);
+        free_env::<*mut c_void>(env_ptr);
+        unsafe {
+            drop(Box::from_raw(payload as *mut i64));
+        }
     }
 
     #[test]

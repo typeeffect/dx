@@ -1,2 +1,3 @@
 main_arithmetic 42
+main_thunk_capture 42
 main_returns_zero 0

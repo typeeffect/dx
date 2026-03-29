@@ -70,6 +70,7 @@ currently narrower:
 
 - `main_returns_zero.dx`
 - `main_arithmetic.dx`
+- `main_thunk_capture.dx`
 
 `main_closure_call_int.dx` already satisfies the entrypoint contract, but it is
 not yet runnable semantically with the current runtime stub because ordinary
@@ -196,7 +197,7 @@ This workflow is not yet the final execution story.
 Major remaining steps:
 
 - broader runtime implementation beyond stubs
-- more complete executable coverage for closure call and thunk paths
+- more complete executable coverage for ordinary closure call paths
 - stronger real-toolchain execution loop
 - richer match/value flow beyond nominal tag checks
 

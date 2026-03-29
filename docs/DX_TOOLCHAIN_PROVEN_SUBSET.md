@@ -211,12 +211,13 @@ Currently runnable:
 
 - `examples/backend/main_returns_zero.dx`
 - `examples/backend/main_arithmetic.dx`
+- `examples/backend/main_thunk_capture.dx`
 
 Not yet runnable semantically with the current runtime stub:
 
 - `examples/backend/main_closure_call_int.dx`
 
-The blocker is concrete: ordinary closure-call and thunk runtime hooks still use
+The remaining blocker is concrete: ordinary closure-call runtime hooks still use
 stub behavior that preserves ABI shape but does not execute the closure body.
 
 ## Current Limits
