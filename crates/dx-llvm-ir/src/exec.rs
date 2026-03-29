@@ -45,6 +45,7 @@ pub enum ExecutableBuildError {
     Toolchain(ToolchainError),
     Io(std::io::Error),
     MissingTool(&'static str),
+    InvalidEntrypoint(&'static str),
     CommandFailed {
         tool: String,
         status: Option<i32>,
@@ -59,6 +60,9 @@ impl std::fmt::Display for ExecutableBuildError {
             ExecutableBuildError::Toolchain(err) => write!(f, "{err}"),
             ExecutableBuildError::Io(err) => write!(f, "i/o error: {err}"),
             ExecutableBuildError::MissingTool(tool) => write!(f, "missing build tool: {tool}"),
+            ExecutableBuildError::InvalidEntrypoint(message) => {
+                write!(f, "invalid executable entrypoint: {message}")
+            }
             ExecutableBuildError::CommandFailed { tool, status, stderr } => {
                 write!(f, "{tool} failed")?;
                 if let Some(status) = status {
@@ -219,6 +223,7 @@ pub fn materialize_source_executable_plan(
         std::fs::create_dir_all(parent)?;
     }
     emit_file_to_path(&plan.input_dx, &plan.executable.ll_path)?;
+    ensure_minimal_executable_entrypoint(&plan.executable.ll_path)?;
     execute_link_plan(&plan.executable.link_plan, tools)
 }
 
@@ -230,6 +235,7 @@ pub fn materialize_verified_executable_plan(
         std::fs::create_dir_all(parent)?;
     }
     emit_file_to_path_and_verify(&plan.source.input_dx, &plan.source.executable.ll_path)?;
+    ensure_minimal_executable_entrypoint(&plan.source.executable.ll_path)?;
     execute_link_plan(&plan.source.executable.link_plan, tools)
 }
 
@@ -337,6 +343,16 @@ fn run_command(binary: &Path, args: &[&str]) -> Result<(), ExecutableBuildError>
     })
 }
 
+fn ensure_minimal_executable_entrypoint(ll_path: &Path) -> Result<(), ExecutableBuildError> {
+    let ir = std::fs::read_to_string(ll_path)?;
+    if ir.contains("define i64 @main()") {
+        return Ok(());
+    }
+    Err(ExecutableBuildError::InvalidEntrypoint(
+        "expected top-level zero-arg `main` returning `Int`",
+    ))
+}
+
 fn find_tool_with_env<F, G>(env_key: &str, name: &str, get_var: F, split_paths_fn: G) -> Option<PathBuf>
 where
     F: Fn(&str) -> Option<std::ffi::OsString>,
@@ -375,15 +391,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dx-exec-{nonce}"));
         fs::create_dir_all(&dir).expect("mkdir");
         dir
-    }
-
-    fn backend_fixture(name: &str) -> PathBuf {
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.pop();
-        path.pop();
-        path.push("examples/backend");
-        path.push(name);
-        path
     }
 
     fn temp_source(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -593,7 +600,7 @@ mod tests {
         let runtime = base.join("target").join(default_target_profile_dir()).join(default_runtime_archive_filename());
         fs::create_dir_all(runtime.parent().expect("parent")).expect("mkdir");
         fs::write(&runtime, "").expect("write runtime");
-        let input = backend_fixture("arithmetic.dx");
+        let input = temp_source(&base, "main.dx", "fun main() -> Int:\n    0\n.\n");
         let build_dir = base.join("build");
         let mut plan = build_source_executable_plan(&input, &build_dir);
         plan.executable.runtime_archive = runtime.clone();
@@ -671,6 +678,33 @@ mod tests {
         .unwrap();
 
         assert_eq!(path, PathBuf::from("/tmp/custom/libdx_runtime_stub.a"));
+    }
+
+    #[test]
+    fn accepts_minimal_int_main_entrypoint() {
+        let base = temp_dir();
+        let ll = base.join("main.ll");
+        fs::write(&ll, "define i64 @main() {\n  ret i64 0\n}\n").expect("write ll");
+
+        ensure_minimal_executable_entrypoint(&ll).expect("valid entrypoint");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rejects_void_main_entrypoint() {
+        let base = temp_dir();
+        let ll = base.join("main.ll");
+        fs::write(&ll, "define void @main() {\n  ret void\n}\n").expect("write ll");
+
+        let err = ensure_minimal_executable_entrypoint(&ll).expect_err("should reject");
+
+        assert_eq!(
+            err.to_string(),
+            "invalid executable entrypoint: expected top-level zero-arg `main` returning `Int`"
+        );
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
