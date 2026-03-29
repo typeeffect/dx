@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod manifest;
 
 use std::ffi::{c_char, c_void, CStr};

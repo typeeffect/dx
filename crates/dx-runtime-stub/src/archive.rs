@@ -1,0 +1,92 @@
+use crate::manifest::EXPORTED_SYMBOLS;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStubArtifactInfo {
+    pub archive_path: PathBuf,
+    pub exported_symbols: &'static [&'static str],
+}
+
+pub fn default_archive_filename() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "dx_runtime_stub.lib"
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "libdx_runtime_stub.a"
+    }
+}
+
+pub fn default_archive_path(target_dir: &Path, profile: &str) -> PathBuf {
+    target_dir.join(profile).join(default_archive_filename())
+}
+
+pub fn default_workspace_archive_path() -> PathBuf {
+    default_archive_path(Path::new("target"), default_profile_dir())
+}
+
+pub fn default_profile_dir() -> &'static str {
+    if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    }
+}
+
+pub fn runtime_stub_artifact_info() -> RuntimeStubArtifactInfo {
+    RuntimeStubArtifactInfo {
+        archive_path: default_workspace_archive_path(),
+        exported_symbols: EXPORTED_SYMBOLS,
+    }
+}
+
+pub fn render_runtime_stub_artifact_info() -> String {
+    let info = runtime_stub_artifact_info();
+    let mut lines = vec![
+        format!("archive {}", info.archive_path.display()),
+        "symbols:".to_string(),
+    ];
+    for symbol in info.exported_symbols {
+        lines.push(format!("  {symbol}"));
+    }
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_archive_path_uses_profile_subdir() {
+        let path = default_archive_path(Path::new("target"), "debug");
+        assert_eq!(
+            path,
+            PathBuf::from("target")
+                .join("debug")
+                .join(default_archive_filename())
+        );
+    }
+
+    #[test]
+    fn workspace_archive_path_points_into_target_profile() {
+        let path = default_workspace_archive_path();
+        assert!(path.starts_with("target"));
+        assert!(path.to_string_lossy().contains(default_profile_dir()));
+    }
+
+    #[test]
+    fn artifact_info_reuses_exported_symbol_manifest() {
+        let info = runtime_stub_artifact_info();
+        assert_eq!(info.exported_symbols, EXPORTED_SYMBOLS);
+        assert!(info.archive_path.ends_with(default_archive_filename()));
+    }
+
+    #[test]
+    fn rendered_artifact_info_is_deterministic() {
+        assert_eq!(
+            render_runtime_stub_artifact_info(),
+            render_runtime_stub_artifact_info()
+        );
+    }
+}
