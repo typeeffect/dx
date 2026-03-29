@@ -468,6 +468,8 @@ The next backend phase is organized into three milestones.
 
 ### Backend Milestone A: Complete the Real Emitter Safely
 
+**Status: closed.**
+
 Goal:
 
 - push `dx-llvm-ir` from a serious subset toward near-complete coverage of the current core without inventing new semantics
@@ -493,6 +495,12 @@ Exit criteria:
 - unsupported cases are explicit and narrow
 
 ### Backend Milestone B: Make the Output LLVM-Toolchain-Ready
+
+**Status: closed.**
+
+The emitted LLVM IR is verified with real LLVM tools, built and linked through
+`dx-build-exec`, and tested through `dx-run-exec` with black-box CLI coverage.
+Verify compatibility covers both legacy LLVM and LLVM 16+.
 
 Goal:
 
@@ -528,6 +536,12 @@ Related backend plans:
 - `docs/DX_MATCH_RUNTIME_PLAN.md`
 
 ### Backend Milestone C: Execute Through a Real Runtime
+
+**Status: closed for the current executable-entry subset.**
+
+All executable-entry demos are now runnable: `main_returns_zero.dx`,
+`main_arithmetic.dx`, `main_closure_call_int.dx`, `main_thunk_capture.dx`.
+Ordinary closure-call dispatch is operational through the runtime stub.
 
 Goal:
 

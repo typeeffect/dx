@@ -1,0 +1,4 @@
+fun main() -> Int:
+    val x = 40
+    x + 2
+.

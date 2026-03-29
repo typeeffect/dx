@@ -83,9 +83,28 @@ pub fn emit_source_to_string(src: &str) -> Result<String, PipelineError> {
     Ok(emit_module(&llvm)?)
 }
 
+pub fn emit_source_to_string_unchecked(src: &str) -> Result<String, PipelineError> {
+    let tokens = Lexer::new(src).tokenize();
+    let mut parser = Parser::new(tokens);
+    let ast = parser
+        .parse_module()
+        .map_err(|err| PipelineError::Parse(err.message))?;
+    let hir = lower_hir(&ast);
+    let typed = typecheck_module(&hir);
+    let mir = lower_mir(&typed.module);
+    let low = lower_low(&mir);
+    let llvm = lower_llvm_like(&low);
+    Ok(emit_module(&llvm)?)
+}
+
 pub fn emit_file_to_string(path: &Path) -> Result<String, PipelineError> {
     let src = fs::read_to_string(path)?;
     emit_source_to_string(&src)
+}
+
+pub fn emit_file_to_string_unchecked(path: &Path) -> Result<String, PipelineError> {
+    let src = fs::read_to_string(path)?;
+    emit_source_to_string_unchecked(&src)
 }
 
 pub fn emit_file_to_path(input: &Path, output: &Path) -> Result<(), PipelineError> {

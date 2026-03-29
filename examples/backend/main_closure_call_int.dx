@@ -1,0 +1,4 @@
+fun main() -> Int:
+    val f = (x: Int) => x + 1
+    f(41)
+.

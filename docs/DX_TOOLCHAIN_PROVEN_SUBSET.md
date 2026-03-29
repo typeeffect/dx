@@ -37,6 +37,10 @@ The current canonical demos live in:
 - `examples/backend/closure_call_str.dx`
 - `examples/backend/closure_call_two_args.dx`
 - `examples/backend/closure_call_void_ret_three_args.dx`
+- `examples/backend/main_arithmetic.dx`
+- `examples/backend/main_closure_call_int.dx`
+- `examples/backend/main_returns_zero.dx`
+- `examples/backend/main_thunk_capture.dx`
 - `examples/backend/match_nominal.dx`
 - `examples/backend/match_with_closure_call.dx`
 - `examples/backend/py_call_dynamic.dx`
@@ -207,18 +211,15 @@ scripts/prove_executable_entry_subset.sh
 Today this runnable subset is intentionally narrower than the full backend demo
 set and narrower than the broader executable-entry fixture set.
 
-Currently runnable:
+All executable-entry demos are now runnable:
 
-- `examples/backend/main_returns_zero.dx`
-- `examples/backend/main_arithmetic.dx`
-- `examples/backend/main_thunk_capture.dx`
+- `examples/backend/main_returns_zero.dx` (exit code 0)
+- `examples/backend/main_arithmetic.dx` (exit code 42)
+- `examples/backend/main_closure_call_int.dx` (exit code 42)
+- `examples/backend/main_thunk_capture.dx` (exit code 42)
 
-Not yet runnable semantically with the current runtime stub:
-
-- `examples/backend/main_closure_call_int.dx`
-
-The remaining blocker is concrete: ordinary closure-call runtime hooks still use
-stub behavior that preserves ABI shape but does not execute the closure body.
+The runnable subset now equals the full executable-entry subset.
+Ordinary closure-call dispatch is operational through the runtime stub.
 
 ## Current Limits
 

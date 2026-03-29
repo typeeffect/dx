@@ -1,0 +1,4 @@
+fun main() -> Int:
+    val f = (x: Int, y: Int) => x + y
+    f(20, 22)
+.

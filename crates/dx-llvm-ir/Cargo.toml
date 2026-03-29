@@ -11,6 +11,21 @@ dx-llvm = { path = "../dx-llvm" }
 dx-mir = { path = "../dx-mir" }
 dx-parser = { path = "../dx-parser" }
 
+[dev-dependencies]
+dx-runtime-stub = { path = "../dx-runtime-stub" }
+
 [[bin]]
 name = "dx-emit-llvm"
 path = "src/bin/dx-emit-llvm.rs"
+
+[[bin]]
+name = "dx-build-exec"
+path = "src/bin/dx-build-exec.rs"
+
+[[bin]]
+name = "dx-run-exec"
+path = "src/bin/dx-run-exec.rs"
+
+[[bin]]
+name = "dx-plan-exec"
+path = "src/bin/dx-plan-exec.rs"

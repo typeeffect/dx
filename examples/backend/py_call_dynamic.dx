@@ -1,0 +1,6 @@
+from py pandas import read_csv
+
+fun invoke(path: Str) -> PyObj !py:
+    val f = read_csv(path)
+    f()
+.

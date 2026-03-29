@@ -1,0 +1,5 @@
+from py pandas import read_csv
+
+fun load(path: Str) -> PyObj !py:
+    read_csv(path)
+.

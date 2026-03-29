@@ -45,14 +45,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-declare -a DEMOS=(
-  "examples/backend/arithmetic.dx"
-  "examples/backend/thunk.dx"
-  "examples/backend/closure_call_int.dx"
-  "examples/backend/closure_call_str.dx"
-  "examples/backend/closure_call_two_args.dx"
-  "examples/backend/match_nominal.dx"
-)
+declare -a DEMOS=()
+while IFS= read -r name; do
+  [[ -z "$name" ]] && continue
+  DEMOS+=("examples/backend/${name}.dx")
+done < "$ROOT_DIR/scripts/canonical_demos.txt"
 
 audit_cmd=("$ROOT_DIR/scripts/audit_backend_demos.sh")
 if [[ -n "$VERIFY_FLAG" ]]; then

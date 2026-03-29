@@ -1,0 +1,9 @@
+fun dispatch(x: Result, n: Int) -> Int:
+    val f = (y: Int) => y + 1
+    match x:
+        Ok(_):
+            f(n)
+        _:
+            0
+    .
+.

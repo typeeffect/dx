@@ -1,0 +1,5 @@
+fun main() -> Int:
+    val x = 40 + 2
+    val t = lazy x
+    t()
+.

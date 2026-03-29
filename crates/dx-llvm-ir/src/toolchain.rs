@@ -72,15 +72,35 @@ impl LlvmToolchain {
         )?;
 
         if let Some(opt) = &self.opt {
-            run_tool(
+            // LLVM 16+ requires `-passes=verify` (new pass manager syntax).
+            // Try new syntax first; fall back to legacy `-verify` for older LLVM.
+            let new_result = run_tool(
                 "opt",
                 opt,
                 &[
                     OsString::from("-disable-output").as_os_str(),
-                    OsString::from("-verify").as_os_str(),
+                    OsString::from("-passes=verify").as_os_str(),
                     ll_path.as_os_str(),
                 ],
-            )?;
+            );
+            match new_result {
+                Ok(()) => {}
+                Err(ToolchainError::CommandFailed { stderr, .. })
+                    if stderr.contains("unknown pass name") =>
+                {
+                    // Legacy LLVM (<16): fall back to `-verify`
+                    run_tool(
+                        "opt",
+                        opt,
+                        &[
+                            OsString::from("-disable-output").as_os_str(),
+                            OsString::from("-verify").as_os_str(),
+                            ll_path.as_os_str(),
+                        ],
+                    )?;
+                }
+                Err(e) => return Err(e),
+            }
         }
 
         Ok(())

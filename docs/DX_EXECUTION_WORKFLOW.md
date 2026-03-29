@@ -64,17 +64,14 @@ Within that broader backend set, the current executable-entry fixtures are:
 - `main_returns_zero.dx`
 - `main_arithmetic.dx`
 - `main_closure_call_int.dx`
-
-Within that executable-entry fixture set, the currently runnable subset is
-currently narrower:
-
-- `main_returns_zero.dx`
-- `main_arithmetic.dx`
 - `main_thunk_capture.dx`
 
-`main_closure_call_int.dx` already satisfies the entrypoint contract, but it is
-not yet runnable semantically with the current runtime stub because ordinary
-closure calls still return stub defaults instead of executing the closure body.
+All executable-entry demos are now runnable with the current runtime stub:
+
+- `main_returns_zero.dx` (exit code 0)
+- `main_arithmetic.dx` (exit code 42)
+- `main_closure_call_int.dx` (exit code 42)
+- `main_thunk_capture.dx` (exit code 42)
 
 These demos are documented in:
 
@@ -108,6 +105,8 @@ cargo run -q -p dx-llvm-ir --bin dx-emit-llvm -- --verify examples/backend/closu
 ```
 
 This only works when LLVM tools are available locally.
+The verify path is compatible with both legacy LLVM (`opt -verify`) and
+LLVM 16+ (`opt -passes=verify`).
 
 ### Show Executable Planning
 
@@ -190,15 +189,40 @@ The status script is the fastest way to export the same operational state as:
 - human-readable Markdown
 - machine-readable JSON
 
-## What Is Still Missing
+## Milestone Status
 
-This workflow is not yet the final execution story.
+### Milestone B: Make the Output LLVM-Toolchain-Ready
+
+**Status: closed.**
+
+The current backend subset is:
+
+- emitted as real textual LLVM IR
+- verified with real LLVM tools (`llvm-as`, `opt -passes=verify`)
+- built and linked through `dx-build-exec` (black-box CLI coverage)
+- tested through `dx-run-exec` (black-box execution coverage)
+
+Verify compatibility covers both legacy LLVM and LLVM 16+.
+
+### Milestone C: Execute Through a Real Runtime
+
+**Status: closed for the current executable-entry subset.**
+
+All executable-entry demos are now runnable:
+
+- `main_returns_zero.dx` (exit code 0)
+- `main_arithmetic.dx` (exit code 42)
+- `main_closure_call_int.dx` (exit code 42)
+- `main_thunk_capture.dx` (exit code 42)
+
+The runnable subset now equals the full executable-entry subset.
+
+## What Is Still Missing
 
 Major remaining steps:
 
+- ordinary closure-call runtime dispatch (the Milestone C blocker)
 - broader runtime implementation beyond stubs
-- more complete executable coverage for ordinary closure call paths
-- stronger real-toolchain execution loop
 - richer match/value flow beyond nominal tag checks
 
 ## Success Criterion For This Phase

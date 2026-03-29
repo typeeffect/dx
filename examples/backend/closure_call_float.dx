@@ -1,0 +1,4 @@
+fun double_it(x: Float) -> Float:
+    val f = (y: Float) => y
+    f(x)
+.

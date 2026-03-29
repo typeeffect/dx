@@ -7,6 +7,8 @@
 	prove-subset \
 	prove-subset-verify \
 	prove-subset-dry-run \
+	prove-runnable \
+	prove-runnable-verify \
 	runtime-stub-info \
 	runtime-stub-plan \
 	runtime-stub-build-plan
@@ -43,6 +45,12 @@ prove-subset-verify:
 
 prove-subset-dry-run:
 	scripts/prove_backend_subset.sh --dry-run
+
+prove-runnable:
+	scripts/prove_executable_entry_subset.sh
+
+prove-runnable-verify:
+	scripts/prove_executable_entry_subset.sh --verify
 
 runtime-stub-info:
 	cargo run -q -p dx-runtime-stub --bin dx-runtime-stub-info

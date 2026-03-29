@@ -1,0 +1,4 @@
+fun combine(s: Str, n: Int) -> Str:
+    val f = (a: Str, b: Int) => a
+    f(s, n)
+.

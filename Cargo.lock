@@ -38,6 +38,7 @@ dependencies = [
  "dx-llvm",
  "dx-mir",
  "dx-parser",
+ "dx-runtime-stub",
 ]
 
 [[package]]

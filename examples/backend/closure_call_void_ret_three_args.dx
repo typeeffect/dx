@@ -1,0 +1,4 @@
+fun consume(n: Int, s: Str, flag: Bool) -> Unit:
+    val f = (a: Int, b: Str, c: Bool) => ()
+    f(n, s, flag)
+.

@@ -1,0 +1,4 @@
+fun main() -> Int:
+    val sub = (a: Int, b: Int) => a - b
+    sub(50, 8)
+.

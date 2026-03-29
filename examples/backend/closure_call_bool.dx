@@ -1,0 +1,4 @@
+fun negate(x: Bool) -> Bool:
+    val f = (y: Bool) => y
+    f(x)
+.

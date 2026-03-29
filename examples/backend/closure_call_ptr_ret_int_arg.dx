@@ -1,0 +1,4 @@
+fun stringify(n: Int) -> Str:
+    val f = (x: Int) => "done"
+    f(n)
+.
