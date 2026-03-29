@@ -1,3 +1,5 @@
+pub mod manifest;
+
 use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
 
