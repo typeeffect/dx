@@ -228,6 +228,9 @@ pub fn materialize_verified_executable_plan(
 }
 
 pub fn default_runtime_archive_path() -> PathBuf {
+    if let Some(path) = configured_runtime_archive_with_env(|key| env::var_os(key)) {
+        return path;
+    }
     configured_target_dir_with_env(|key| env::var_os(key))
         .unwrap_or_else(|| PathBuf::from("target"))
         .join(
@@ -268,6 +271,13 @@ where
     F: Fn(&str) -> Option<String>,
 {
     get_var("DX_RUNTIME_STUB_PROFILE")
+}
+
+fn configured_runtime_archive_with_env<F>(get_var: F) -> Option<PathBuf>
+where
+    F: Fn(&str) -> Option<std::ffi::OsString>,
+{
+    get_var("DX_RUNTIME_STUB_ARCHIVE").map(PathBuf::from)
 }
 
 fn ensure_parent_dirs(plan: &LinkCommandPlan) -> Result<(), std::io::Error> {
@@ -614,5 +624,16 @@ mod tests {
                 .join("dist")
                 .join(default_runtime_archive_filename())
         );
+    }
+
+    #[test]
+    fn runtime_archive_path_honors_explicit_archive_override() {
+        let path = configured_runtime_archive_with_env(|key| match key {
+            "DX_RUNTIME_STUB_ARCHIVE" => Some("/tmp/custom/libdx_runtime_stub.a".into()),
+            _ => None,
+        })
+        .unwrap();
+
+        assert_eq!(path, PathBuf::from("/tmp/custom/libdx_runtime_stub.a"));
     }
 }
