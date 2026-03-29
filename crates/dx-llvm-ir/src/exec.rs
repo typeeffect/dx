@@ -1,6 +1,7 @@
 use crate::link::{build_link_command_plan, LinkCommandPlan};
 use crate::pipeline::{emit_file_to_path, emit_file_to_path_and_verify, PipelineError};
 use crate::toolchain::{LlvmToolchain, ToolchainError};
+use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -159,7 +160,8 @@ pub fn discover_executable_tools() -> Result<ExecutableTools, ExecutableBuildErr
         .llc
         .clone()
         .ok_or(ExecutableBuildError::MissingTool("llc"))?;
-    let cc = find_tool_in_path("cc").ok_or(ExecutableBuildError::MissingTool("cc"))?;
+    let cc = find_tool_with_env("DX_CC", "cc", |key| env::var_os(key), env::split_paths)
+        .ok_or(ExecutableBuildError::MissingTool("cc"))?;
     Ok(ExecutableTools {
         llvm_as: llvm.llvm_as,
         llc,
@@ -226,8 +228,12 @@ pub fn materialize_verified_executable_plan(
 }
 
 pub fn default_runtime_archive_path() -> PathBuf {
-    PathBuf::from("target")
-        .join(default_target_profile_dir())
+    configured_target_dir_with_env(|key| env::var_os(key))
+        .unwrap_or_else(|| PathBuf::from("target"))
+        .join(
+            configured_profile_dir_with_env(|key| env::var(key).ok())
+                .unwrap_or_else(|| default_target_profile_dir().to_string()),
+        )
         .join(default_runtime_archive_filename())
 }
 
@@ -248,6 +254,20 @@ fn default_runtime_archive_filename() -> &'static str {
     {
         "libdx_runtime_stub.a"
     }
+}
+
+fn configured_target_dir_with_env<F>(get_var: F) -> Option<PathBuf>
+where
+    F: Fn(&str) -> Option<std::ffi::OsString>,
+{
+    get_var("CARGO_TARGET_DIR").map(PathBuf::from)
+}
+
+fn configured_profile_dir_with_env<F>(get_var: F) -> Option<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    get_var("DX_RUNTIME_STUB_PROFILE")
 }
 
 fn ensure_parent_dirs(plan: &LinkCommandPlan) -> Result<(), std::io::Error> {
@@ -277,9 +297,20 @@ fn run_command(binary: &Path, args: &[&str]) -> Result<(), ExecutableBuildError>
     })
 }
 
-fn find_tool_in_path(name: &str) -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
+fn find_tool_with_env<F, G>(env_key: &str, name: &str, get_var: F, split_paths_fn: G) -> Option<PathBuf>
+where
+    F: Fn(&str) -> Option<std::ffi::OsString>,
+    G: Fn(&std::ffi::OsString) -> env::SplitPaths<'_>,
+{
+    if let Some(path) = get_var(env_key) {
+        let candidate = PathBuf::from(path);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    let path_var = get_var("PATH")?;
+    for dir in split_paths_fn(&path_var) {
         let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);
@@ -359,10 +390,12 @@ mod tests {
     #[test]
     fn default_runtime_archive_path_points_into_target_profile_dir() {
         let path = default_runtime_archive_path();
-        assert!(path.starts_with("target"));
-        assert!(path
-            .to_string_lossy()
-            .contains(default_target_profile_dir()));
+        let target_root = configured_target_dir_with_env(|key| env::var_os(key))
+            .unwrap_or_else(|| PathBuf::from("target"));
+        let profile = configured_profile_dir_with_env(|key| env::var(key).ok())
+            .unwrap_or_else(|| default_target_profile_dir().to_string());
+        assert!(path.starts_with(target_root));
+        assert!(path.to_string_lossy().contains(&profile));
     }
 
     #[test]
@@ -534,5 +567,52 @@ mod tests {
         assert!(contents.contains("cc"), "got:\n{contents}");
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn discovers_cc_from_explicit_env_override() {
+        let base = temp_dir();
+        let cc = write_script(&base, "my-cc", "exit 0");
+        let path = base.as_os_str().to_os_string();
+        let explicit = cc.as_os_str().to_os_string();
+        let found = find_tool_with_env(
+            "DX_CC",
+            "cc",
+            |key| match key {
+                "DX_CC" => Some(explicit.clone()),
+                "PATH" => Some(path.clone()),
+                _ => None,
+            },
+            env::split_paths,
+        );
+
+        assert_eq!(found.as_deref(), Some(cc.as_path()));
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn runtime_archive_path_honors_env_configuration() {
+        let path = configured_target_dir_with_env(|key| match key {
+            "CARGO_TARGET_DIR" => Some("/tmp/dx-target".into()),
+            _ => None,
+        })
+        .unwrap()
+        .join(
+            configured_profile_dir_with_env(|key| match key {
+                "DX_RUNTIME_STUB_PROFILE" => Some("dist".to_string()),
+                _ => None,
+            })
+            .unwrap(),
+        )
+        .join(default_runtime_archive_filename());
+
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/dx-target")
+                .join("dist")
+                .join(default_runtime_archive_filename())
+        );
     }
 }
