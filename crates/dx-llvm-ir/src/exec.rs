@@ -9,6 +9,13 @@ pub struct ExecutablePlan {
     pub link_plan: LinkCommandPlan,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceExecutablePlan {
+    pub input_dx: PathBuf,
+    pub emit_command: Vec<String>,
+    pub executable: ExecutablePlan,
+}
+
 pub fn build_executable_plan_from_ll(
     ll_path: &Path,
     runtime_archive: &Path,
@@ -32,6 +39,21 @@ pub fn build_executable_plan_from_source(input_dx: &Path, build_dir: &Path) -> E
     let executable_path = build_dir.join(stem);
     let runtime_archive = default_runtime_archive_path();
     build_executable_plan_from_ll(&ll_path, &runtime_archive, &executable_path)
+}
+
+pub fn build_source_executable_plan(input_dx: &Path, build_dir: &Path) -> SourceExecutablePlan {
+    let executable = build_executable_plan_from_source(input_dx, build_dir);
+    let emit_command = vec![
+        "dx-emit-llvm".to_string(),
+        input_dx.display().to_string(),
+        executable.ll_path.display().to_string(),
+    ];
+
+    SourceExecutablePlan {
+        input_dx: input_dx.to_path_buf(),
+        emit_command,
+        executable,
+    }
 }
 
 pub fn default_runtime_archive_path() -> PathBuf {
@@ -101,5 +123,25 @@ mod tests {
         assert!(path
             .to_string_lossy()
             .contains(default_target_profile_dir()));
+    }
+
+    #[test]
+    fn source_executable_plan_includes_emit_step_and_link_plan() {
+        let plan = build_source_executable_plan(
+            Path::new("examples/demo.dx"),
+            Path::new("build"),
+        );
+
+        assert_eq!(plan.input_dx, PathBuf::from("examples/demo.dx"));
+        assert_eq!(
+            plan.emit_command,
+            vec![
+                "dx-emit-llvm".to_string(),
+                "examples/demo.dx".to_string(),
+                "build/demo.ll".to_string(),
+            ]
+        );
+        assert_eq!(plan.executable.ll_path, PathBuf::from("build/demo.ll"));
+        assert_eq!(plan.executable.link_plan.object_path, PathBuf::from("build/demo.o"));
     }
 }
