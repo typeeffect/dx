@@ -42,6 +42,8 @@ pub enum SchemaArtifactError {
     UnknownSection(String),
     UnknownSchemaKey(String),
     DuplicateKey(String),
+    InvalidFingerprint(String),
+    InvalidTimestamp(String),
     InvalidLine(String),
     InvalidStringValue(String),
     InvalidFieldSpec(String),
@@ -61,6 +63,12 @@ impl std::fmt::Display for SchemaArtifactError {
                 write!(f, "unknown schema key: {name}")
             }
             SchemaArtifactError::DuplicateKey(name) => write!(f, "duplicate key: {name}"),
+            SchemaArtifactError::InvalidFingerprint(value) => {
+                write!(f, "invalid fingerprint: {value}")
+            }
+            SchemaArtifactError::InvalidTimestamp(value) => {
+                write!(f, "invalid timestamp: {value}")
+            }
             SchemaArtifactError::InvalidLine(line) => write!(f, "invalid line: {line}"),
             SchemaArtifactError::InvalidStringValue(value) => {
                 write!(f, "invalid string value: {value}")
@@ -165,6 +173,21 @@ pub fn validate_artifact(artifact: &SchemaArtifact) -> Result<(), SchemaArtifact
     }
     if artifact.schema.source.trim().is_empty() {
         return Err(SchemaArtifactError::MissingField("source"));
+    }
+    if !is_valid_fingerprint(&artifact.schema.source_fingerprint) {
+        return Err(SchemaArtifactError::InvalidFingerprint(
+            artifact.schema.source_fingerprint.clone(),
+        ));
+    }
+    if !is_valid_fingerprint(&artifact.schema.schema_fingerprint) {
+        return Err(SchemaArtifactError::InvalidFingerprint(
+            artifact.schema.schema_fingerprint.clone(),
+        ));
+    }
+    if !is_valid_timestamp(&artifact.schema.generated_at) {
+        return Err(SchemaArtifactError::InvalidTimestamp(
+            artifact.schema.generated_at.clone(),
+        ));
     }
     if artifact.fields.is_empty() {
         return Err(SchemaArtifactError::MissingSection("fields"));
@@ -311,6 +334,34 @@ fn render_dx_type(ty: DxSchemaType) -> &'static str {
 
 fn escape_json(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn is_valid_fingerprint(value: &str) -> bool {
+    if !value.starts_with("sha256:") {
+        return false;
+    }
+    let digest = &value["sha256:".len()..];
+    !digest.is_empty()
+}
+
+fn is_valid_timestamp(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 20 {
+        return false;
+    }
+    bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'Z'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(idx, b)| match idx {
+                4 | 7 | 10 | 13 | 16 | 19 => true,
+                _ => b.is_ascii_digit(),
+            })
 }
 
 fn parse_field_spec(value: &str) -> Result<SchemaField, SchemaArtifactError> {
@@ -498,6 +549,46 @@ id = { type = "Int", nullable = false }
 
         let err = parse_artifact(src).expect_err("should reject");
         assert_eq!(err.to_string(), "unknown schema key: owner");
+    }
+
+    #[test]
+    fn rejects_invalid_fingerprint_shape() {
+        let src = r#"
+[schema]
+format_version = "0.1.0"
+name = "Customers"
+provider = "csv"
+source = "data/customers.csv"
+source_fingerprint = "md5:abc"
+schema_fingerprint = "sha256:2"
+generated_at = "2026-03-29T10:00:00Z"
+
+[fields]
+id = { type = "Int", nullable = false }
+"#;
+
+        let err = parse_artifact(src).expect_err("should reject");
+        assert_eq!(err.to_string(), "invalid fingerprint: md5:abc");
+    }
+
+    #[test]
+    fn rejects_invalid_timestamp_shape() {
+        let src = r#"
+[schema]
+format_version = "0.1.0"
+name = "Customers"
+provider = "csv"
+source = "data/customers.csv"
+source_fingerprint = "sha256:1"
+schema_fingerprint = "sha256:2"
+generated_at = "2026-03-29 10:00:00"
+
+[fields]
+id = { type = "Int", nullable = false }
+"#;
+
+        let err = parse_artifact(src).expect_err("should reject");
+        assert_eq!(err.to_string(), "invalid timestamp: 2026-03-29 10:00:00");
     }
 
     #[test]
