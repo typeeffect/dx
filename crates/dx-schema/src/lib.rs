@@ -157,6 +157,16 @@ pub fn validate_artifact(artifact: &SchemaArtifact) -> Result<(), SchemaArtifact
     Ok(())
 }
 
+pub fn render_artifact_summary(artifact: &SchemaArtifact) -> String {
+    format!(
+        "OK name={} provider={} fields={} format_version={}",
+        artifact.schema.name,
+        artifact.schema.provider,
+        artifact.fields.len(),
+        artifact.schema.format_version
+    )
+}
+
 fn strip_comment(line: &str) -> &str {
     match line.find('#') {
         Some(index) => &line[..index],
@@ -319,5 +329,14 @@ generated_at = "2026-03-29T10:00:00Z"
 
         let err = parse_artifact(src).expect_err("should reject");
         assert_eq!(err.to_string(), "missing section `fields`");
+    }
+
+    #[test]
+    fn renders_summary_for_example() {
+        let artifact = load_artifact(&example_path("customers.dxschema.example")).expect("parse");
+        assert_eq!(
+            render_artifact_summary(&artifact),
+            "OK name=Customers provider=csv fields=6 format_version=0.1.0"
+        );
     }
 }

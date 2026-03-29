@@ -3,3 +3,7 @@ name = "dx-schema"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[[bin]]
+name = "dx-schema-validate"
+path = "src/bin/dx-schema-validate.rs"
