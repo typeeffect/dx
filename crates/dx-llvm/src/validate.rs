@@ -62,6 +62,11 @@ pub fn validate_module(module: &Module) -> ValidationReport {
                 message: format!("duplicate function '{}'", function.name),
             });
         }
+    }
+    for function in &module.functions {
+        global_symbols.insert(function.name.clone());
+    }
+    for function in &module.functions {
         validate_function(function, &global_symbols, &extern_index, &mut diagnostics);
     }
 
@@ -460,12 +465,36 @@ fn validate_special_runtime_call(
     };
 
     match first_arg {
+        Operand::Global(_, Type::Ptr) => {}
+        Operand::Global(_, other) => diagnostics.push(ValidationDiagnostic {
+            function: Some(function.name.clone()),
+            block: Some(block.label.clone()),
+            message: format!(
+                "closure create expects first arg to be a Ptr function/global symbol, got {:?}",
+                other
+            ),
+        }),
+        other => diagnostics.push(ValidationDiagnostic {
+            function: Some(function.name.clone()),
+            block: Some(block.label.clone()),
+            message: format!(
+                "closure create expects first arg to be a function/global symbol, got {:?}",
+                other
+            ),
+        }),
+    }
+
+    let Some(second_arg) = args.get(1) else {
+        return;
+    };
+
+    match second_arg {
         Operand::Register(name, Type::Ptr) if pack_env_registers.contains(name) => {}
         Operand::Register(name, Type::Ptr) => diagnostics.push(ValidationDiagnostic {
             function: Some(function.name.clone()),
             block: Some(block.label.clone()),
             message: format!(
-                "closure create expects first arg to be a PackEnv result, got register '{}'",
+                "closure create expects second arg to be a PackEnv result, got register '{}'",
                 name
             ),
         }),
@@ -473,7 +502,7 @@ fn validate_special_runtime_call(
             function: Some(function.name.clone()),
             block: Some(block.label.clone()),
             message: format!(
-                "closure create expects first arg to be a PackEnv ptr register, got {:?}",
+                "closure create expects second arg to be a PackEnv ptr register, got {:?}",
                 other
             ),
         }),
@@ -1177,54 +1206,67 @@ mod tests {
     }
 
     #[test]
-    fn accepts_closure_create_with_pack_env_first_arg() {
+    fn accepts_closure_create_with_function_symbol_and_pack_env_second_arg() {
         let module = Module {
             globals: vec![],
             externs: vec![ExternDecl {
                 symbol: "dx_rt_closure_create",
-                params: vec![Type::Ptr, Type::I64],
+                params: vec![Type::Ptr, Type::Ptr, Type::I64],
                 ret: Type::Ptr,
             }],
-            functions: vec![Function {
-                name: "f".into(),
-                params: vec![Param {
-                    name: "%0".into(),
-                    ty: Type::I64,
-                }],
-                ret: Type::Ptr,
-                blocks: vec![Block {
-                    label: "bb0".into(),
-                    instructions: vec![
-                        Instruction::PackEnv {
-                            result: "%1".into(),
-                            captures: vec![Operand::Register("%0".into(), Type::I64)],
-                        },
-                        Instruction::CallExtern {
-                            result: Some("%2".into()),
-                            symbol: "dx_rt_closure_create",
-                            ret: Type::Ptr,
-                            args: vec![
-                                Operand::Register("%1".into(), Type::Ptr),
-                                Operand::ConstInt(0),
-                            ],
-                            comment: None,
-                        },
-                    ],
-                    terminator: Terminator::Ret(Some(Operand::Register("%2".into(), Type::Ptr))),
-                }],
-            }],
+            functions: vec![
+                Function {
+                    name: "f".into(),
+                    params: vec![Param {
+                        name: "%0".into(),
+                        ty: Type::I64,
+                    }],
+                    ret: Type::Ptr,
+                    blocks: vec![Block {
+                        label: "bb0".into(),
+                        instructions: vec![
+                            Instruction::PackEnv {
+                                result: "%1".into(),
+                                captures: vec![Operand::Register("%0".into(), Type::I64)],
+                            },
+                            Instruction::CallExtern {
+                                result: Some("%2".into()),
+                                symbol: "dx_rt_closure_create",
+                                ret: Type::Ptr,
+                                args: vec![
+                                    Operand::Global("f$closure$0".into(), Type::Ptr),
+                                    Operand::Register("%1".into(), Type::Ptr),
+                                    Operand::ConstInt(0),
+                                ],
+                                comment: None,
+                            },
+                        ],
+                        terminator: Terminator::Ret(Some(Operand::Register("%2".into(), Type::Ptr))),
+                    }],
+                },
+                Function {
+                    name: "f$closure$0".into(),
+                    params: vec![],
+                    ret: Type::I64,
+                    blocks: vec![Block {
+                        label: "bb0".into(),
+                        instructions: vec![],
+                        terminator: Terminator::Ret(Some(Operand::ConstInt(0))),
+                    }],
+                },
+            ],
         };
         let report = validate_module(&module);
         assert!(report.is_ok(), "diagnostics: {:?}", report.diagnostics);
     }
 
     #[test]
-    fn rejects_closure_create_without_pack_env_first_arg() {
+    fn rejects_closure_create_without_function_symbol_first_arg() {
         let module = Module {
             globals: vec![],
             externs: vec![ExternDecl {
                 symbol: "dx_rt_closure_create",
-                params: vec![Type::Ptr, Type::I64],
+                params: vec![Type::Ptr, Type::Ptr, Type::I64],
                 ret: Type::Ptr,
             }],
             functions: vec![Function {
@@ -1243,6 +1285,7 @@ mod tests {
                         args: vec![
                             Operand::Register("%0".into(), Type::Ptr),
                             Operand::ConstInt(0),
+                            Operand::ConstInt(0),
                         ],
                         comment: None,
                     }],
@@ -1254,7 +1297,7 @@ mod tests {
         assert!(report
             .diagnostics
             .iter()
-            .any(|d| d.message.contains("closure create expects first arg to be a PackEnv result")));
+            .any(|d| d.message.contains("closure create expects first arg to be a function/global symbol")));
     }
 
     #[test]

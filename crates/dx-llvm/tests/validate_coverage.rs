@@ -1138,7 +1138,7 @@ fn validator_accepts_pack_env_into_closure_create() {
         globals: vec![],
         externs: vec![ExternDecl {
             symbol: "dx_rt_closure_create",
-            params: vec![Type::Ptr, Type::I64],
+            params: vec![Type::Ptr, Type::Ptr, Type::I64],
             ret: Type::Ptr,
         }],
         functions: vec![Function {
@@ -1157,6 +1157,7 @@ fn validator_accepts_pack_env_into_closure_create() {
                         symbol: "dx_rt_closure_create",
                         ret: Type::Ptr,
                         args: vec![
+                            Operand::Global("f$closure$0".into(), Type::Ptr),
                             Operand::Register("%env".into(), Type::Ptr),
                             Operand::ConstInt(0),
                         ],
@@ -1164,6 +1165,16 @@ fn validator_accepts_pack_env_into_closure_create() {
                     },
                 ],
                 terminator: Terminator::Ret(Some(Operand::Register("%1".into(), Type::Ptr))),
+            }],
+        },
+        Function {
+            name: "f$closure$0".into(),
+            params: vec![],
+            ret: Type::I64,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![],
+                terminator: Terminator::Ret(Some(Operand::ConstInt(0))),
             }],
         }],
     };

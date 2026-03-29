@@ -73,7 +73,7 @@ pub struct ClosureRuntimePlan {
     pub invocations: Vec<LoweredClosureInvocation>,
 }
 
-const CREATE_PARAMS: &[ClosureAbiType] = &[ClosureAbiType::EnvHandle, ClosureAbiType::U32];
+const CREATE_PARAMS: &[ClosureAbiType] = &[ClosureAbiType::Ptr, ClosureAbiType::EnvHandle, ClosureAbiType::U32];
 const THUNK_CALL_PARAMS: &[ClosureAbiType] = &[ClosureAbiType::ClosureHandle];
 
 impl ClosureRuntimeHook {

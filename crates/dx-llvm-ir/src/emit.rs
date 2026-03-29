@@ -307,21 +307,21 @@ fn lower_operand(state: &mut FunctionEmitState<'_>, operand: &Operand, out: &mut
             Ok(tmp)
         }
         Operand::Global(name, _) => {
-            let global = state
-                .module
-                .globals
-                .iter()
-                .find(|g| g.symbol == *name)
-                .ok_or_else(|| EmitError::MissingStringGlobal(name.clone()))?;
-            let tmp = state.fresh();
-            let len = global.value.len() + 1;
-            writeln!(
-                out,
-                "  {tmp} = getelementptr inbounds [{} x i8], ptr @{}, i64 0, i64 0",
-                len, name
-            )
-            .unwrap();
-            Ok(tmp)
+            if let Some(global) = state.module.globals.iter().find(|g| g.symbol == *name) {
+                let tmp = state.fresh();
+                let len = global.value.len() + 1;
+                writeln!(
+                    out,
+                    "  {tmp} = getelementptr inbounds [{} x i8], ptr @{}, i64 0, i64 0",
+                    len, name
+                )
+                .unwrap();
+                Ok(tmp)
+            } else if state.module.functions.iter().any(|f| f.name == *name) {
+                Ok(format!("@{name}"))
+            } else {
+                Err(EmitError::MissingStringGlobal(name.clone()))
+            }
         }
     }
 }

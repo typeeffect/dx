@@ -224,7 +224,7 @@ fn lower_instructions(step: &LowStep, state: &mut LoweringState) -> Vec<Instruct
             LowRuntimeCallKind::ClosureCreate {
                 captures,
                 arity,
-                entry_function: _,
+                entry_function,
             } => {
                 let env = format!("%env_{statement}");
                 vec![
@@ -239,7 +239,11 @@ fn lower_instructions(step: &LowStep, state: &mut LoweringState) -> Vec<Instruct
                         result: destination.map(|local| format!("%{}", local)),
                         symbol,
                         ret: ret.as_ref().map(lower_type).unwrap_or(Type::Void),
-                        args: vec![Operand::Register(env, Type::Ptr), Operand::ConstInt(*arity as i64)],
+                        args: vec![
+                            Operand::Global(entry_function.clone(), Type::Ptr),
+                            Operand::Register(env, Type::Ptr),
+                            Operand::ConstInt(*arity as i64),
+                        ],
                         comment: Some(format!("stmt={statement}, {}", runtime_call_comment(kind))),
                     },
                 ]

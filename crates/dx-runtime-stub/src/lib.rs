@@ -14,6 +14,7 @@ pub type Utf8Ptr = *const c_char;
 
 #[repr(C)]
 struct StubClosure {
+    code_ptr: *mut c_void,
     env: EnvHandle,
     arity: u32,
 }
@@ -35,8 +36,12 @@ fn closure_env_ptr<T>(closure: ClosureHandle) -> Option<*const T> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn dx_rt_closure_create(env: EnvHandle, arity: u32) -> ClosureHandle {
-    let closure = Box::new(StubClosure { env, arity });
+pub extern "C" fn dx_rt_closure_create(
+    code_ptr: *mut c_void,
+    env: EnvHandle,
+    arity: u32,
+) -> ClosureHandle {
+    let closure = Box::new(StubClosure { code_ptr, env, arity });
     Box::into_raw(closure) as ClosureHandle
 }
 
@@ -170,14 +175,14 @@ mod tests {
 
     #[test]
     fn closure_create_returns_handle() {
-        let handle = dx_rt_closure_create(ptr::null_mut(), 0);
+        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 0);
         assert!(!handle.is_null());
         free_closure(handle);
     }
 
     #[test]
     fn thunk_calls_return_default_values() {
-        let handle = dx_rt_closure_create(ptr::null_mut(), 0);
+        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 0);
         assert_eq!(dx_rt_thunk_call_i64(handle), 0);
         assert_eq!(dx_rt_thunk_call_f64(handle), 0.0);
         assert!(!dx_rt_thunk_call_i1(handle));
@@ -194,10 +199,10 @@ mod tests {
         let payload = Box::into_raw(Box::new(123_i64)) as *mut c_void;
         let env_ptr = Box::into_raw(Box::new(payload)) as EnvHandle;
 
-        let thunk_i64 = dx_rt_closure_create(env_i64, 0);
-        let thunk_f64 = dx_rt_closure_create(env_f64, 0);
-        let thunk_i1 = dx_rt_closure_create(env_i1, 0);
-        let thunk_ptr = dx_rt_closure_create(env_ptr, 0);
+        let thunk_i64 = dx_rt_closure_create(ptr::null_mut(), env_i64, 0);
+        let thunk_f64 = dx_rt_closure_create(ptr::null_mut(), env_f64, 0);
+        let thunk_i1 = dx_rt_closure_create(ptr::null_mut(), env_i1, 0);
+        let thunk_ptr = dx_rt_closure_create(ptr::null_mut(), env_ptr, 0);
 
         assert_eq!(dx_rt_thunk_call_i64(thunk_i64), 42);
         assert_eq!(dx_rt_thunk_call_f64(thunk_f64), 3.5);
@@ -219,13 +224,22 @@ mod tests {
 
     #[test]
     fn closure_call_stubs_return_default_values() {
-        let handle = dx_rt_closure_create(ptr::null_mut(), 1);
+        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 1);
         assert_eq!(dx_rt_closure_call_i64_1_i64(handle, 7), 0);
         assert_eq!(dx_rt_closure_call_i64_2_i64_i64(handle, 7, 9), 0);
         assert!(dx_rt_closure_call_ptr_1_ptr(handle, ptr::null_mut()).is_null());
         assert!(dx_rt_closure_call_ptr_1_i64(handle, 7).is_null());
         assert!(dx_rt_closure_call_ptr_2_ptr_i64(handle, ptr::null_mut(), 9).is_null());
         dx_rt_closure_call_void_3_i64_ptr_i1(handle, 1, ptr::null_mut(), false);
+        free_closure(handle);
+    }
+
+    #[test]
+    fn closure_create_preserves_code_pointer() {
+        let sentinel = 0x1234usize as *mut c_void;
+        let handle = dx_rt_closure_create(sentinel, ptr::null_mut(), 1);
+        let closure = unsafe { &*(handle as *const StubClosure) };
+        assert_eq!(closure.code_ptr, sentinel);
         free_closure(handle);
     }
 
