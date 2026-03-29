@@ -40,6 +40,8 @@ pub enum SchemaArtifactError {
     MissingSection(&'static str),
     MissingField(&'static str),
     UnknownSection(String),
+    UnknownSchemaKey(String),
+    DuplicateKey(String),
     InvalidLine(String),
     InvalidStringValue(String),
     InvalidFieldSpec(String),
@@ -55,6 +57,10 @@ impl std::fmt::Display for SchemaArtifactError {
             SchemaArtifactError::MissingSection(name) => write!(f, "missing section `{name}`"),
             SchemaArtifactError::MissingField(name) => write!(f, "missing field `{name}`"),
             SchemaArtifactError::UnknownSection(name) => write!(f, "unknown section `{name}`"),
+            SchemaArtifactError::UnknownSchemaKey(name) => {
+                write!(f, "unknown schema key: {name}")
+            }
+            SchemaArtifactError::DuplicateKey(name) => write!(f, "duplicate key: {name}"),
             SchemaArtifactError::InvalidLine(line) => write!(f, "invalid line: {line}"),
             SchemaArtifactError::InvalidStringValue(value) => {
                 write!(f, "invalid string value: {value}")
@@ -101,11 +107,20 @@ pub fn parse_artifact(src: &str) -> Result<SchemaArtifact, SchemaArtifactError> 
         match section {
             Some("schema") => {
                 let (key, value) = parse_assignment(line)?;
-                schema_pairs.insert(key.to_string(), parse_string_literal(value)?);
+                let key = parse_schema_key(key)?;
+                let value = parse_string_literal(value)?;
+                if schema_pairs.insert(key.to_string(), value).is_some() {
+                    return Err(SchemaArtifactError::DuplicateKey(key.to_string()));
+                }
             }
             Some("fields") => {
                 let (name, value) = parse_assignment(line)?;
-                fields.insert(name.to_string(), parse_field_spec(value)?);
+                if fields
+                    .insert(name.to_string(), parse_field_spec(value)?)
+                    .is_some()
+                {
+                    return Err(SchemaArtifactError::DuplicateKey(name.to_string()));
+                }
             }
             _ => return Err(SchemaArtifactError::InvalidLine(line.to_string())),
         }
@@ -186,6 +201,19 @@ fn parse_string_literal(value: &str) -> Result<String, SchemaArtifactError> {
         Ok(value[1..value.len() - 1].to_string())
     } else {
         Err(SchemaArtifactError::InvalidStringValue(value.to_string()))
+    }
+}
+
+fn parse_schema_key(key: &str) -> Result<&str, SchemaArtifactError> {
+    match key {
+        "format_version"
+        | "name"
+        | "provider"
+        | "source"
+        | "source_fingerprint"
+        | "schema_fingerprint"
+        | "generated_at" => Ok(key),
+        _ => Err(SchemaArtifactError::UnknownSchemaKey(key.to_string())),
     }
 }
 
@@ -329,6 +357,69 @@ generated_at = "2026-03-29T10:00:00Z"
 
         let err = parse_artifact(src).expect_err("should reject");
         assert_eq!(err.to_string(), "missing section `fields`");
+    }
+
+    #[test]
+    fn rejects_duplicate_schema_key() {
+        let src = r#"
+[schema]
+format_version = "0.1.0"
+name = "Customers"
+name = "Other"
+provider = "csv"
+source = "data/customers.csv"
+source_fingerprint = "sha256:1"
+schema_fingerprint = "sha256:2"
+generated_at = "2026-03-29T10:00:00Z"
+
+[fields]
+id = { type = "Int", nullable = false }
+"#;
+
+        let err = parse_artifact(src).expect_err("should reject");
+        assert_eq!(err.to_string(), "duplicate key: name");
+    }
+
+    #[test]
+    fn rejects_duplicate_field_name() {
+        let src = r#"
+[schema]
+format_version = "0.1.0"
+name = "Customers"
+provider = "csv"
+source = "data/customers.csv"
+source_fingerprint = "sha256:1"
+schema_fingerprint = "sha256:2"
+generated_at = "2026-03-29T10:00:00Z"
+
+[fields]
+id = { type = "Int", nullable = false }
+id = { type = "Int", nullable = true }
+"#;
+
+        let err = parse_artifact(src).expect_err("should reject");
+        assert_eq!(err.to_string(), "duplicate key: id");
+    }
+
+    #[test]
+    fn rejects_unknown_schema_key() {
+        let src = r#"
+[schema]
+format_version = "0.1.0"
+name = "Customers"
+provider = "csv"
+source = "data/customers.csv"
+source_fingerprint = "sha256:1"
+schema_fingerprint = "sha256:2"
+generated_at = "2026-03-29T10:00:00Z"
+owner = "analytics"
+
+[fields]
+id = { type = "Int", nullable = false }
+"#;
+
+        let err = parse_artifact(src).expect_err("should reject");
+        assert_eq!(err.to_string(), "unknown schema key: owner");
     }
 
     #[test]
