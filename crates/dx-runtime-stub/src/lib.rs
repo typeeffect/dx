@@ -548,10 +548,10 @@ pub extern "C" fn dx_rt_thunk_call_ptr(closure: ClosureHandle) -> *mut c_void {
                 fun(env.a, env.b)
             }
             (false, 3) => {
-                let env = unsafe { &*(closure.env as *const CaptureI64PtrI1) };
-                let fun: extern "C" fn(i64, *mut c_void, bool) -> *mut c_void =
+                let env = unsafe { &*(closure.env as *const Capture3Ptr) };
+                let fun: extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void =
                     unsafe { std::mem::transmute(closure.code_ptr) };
-                fun(env.i, env.p, env.b)
+                fun(env.a, env.b, env.c)
             }
             _ => ptr::null_mut(),
         };
@@ -880,6 +880,14 @@ mod tests {
 
     extern "C" fn second_ptr_thunk(_c0: *mut c_void, c1: *mut c_void) -> *mut c_void {
         c1
+    }
+
+    extern "C" fn third_ptr_thunk(
+        _c0: *mut c_void,
+        _c1: *mut c_void,
+        c2: *mut c_void,
+    ) -> *mut c_void {
+        c2
     }
 
     extern "C" fn mixed_ptr_thunk(_c0: i64, c1: *mut c_void, c2: bool) -> *mut c_void {
@@ -1254,6 +1262,24 @@ mod tests {
         free_closure(thunk_mixed);
         free_env::<Capture2Ptr>(env_ptrs);
         free_env::<CaptureI64PtrI1>(env_mixed);
+    }
+
+    #[test]
+    fn thunk_ptr_calls_can_dispatch_with_three_ptr_captures() {
+        let payload0 = 0x1234usize as *mut c_void;
+        let payload1 = 0x5678usize as *mut c_void;
+        let payload2 = 0x9abcusize as *mut c_void;
+        let env = Box::into_raw(Box::new(Capture3Ptr {
+            a: payload0,
+            b: payload1,
+            c: payload2,
+        })) as EnvHandle;
+        let thunk = dx_rt_closure_create(third_ptr_thunk as *mut c_void, env, 0, 3);
+
+        assert_eq!(dx_rt_thunk_call_ptr(thunk), payload2);
+
+        free_closure(thunk);
+        free_env::<Capture3Ptr>(env);
     }
 
     #[test]
