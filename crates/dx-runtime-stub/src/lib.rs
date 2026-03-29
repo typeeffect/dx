@@ -43,17 +43,6 @@ struct StubTaggedValue {
     tag: Utf8Ptr,
 }
 
-fn closure_env_ptr<T>(closure: ClosureHandle) -> Option<*const T> {
-    if closure.is_null() {
-        return None;
-    }
-    let closure = unsafe { &*(closure as *const StubClosure) };
-    if closure.env.is_null() {
-        return None;
-    }
-    Some(closure.env as *const T)
-}
-
 fn closure_ptr(closure: ClosureHandle) -> Option<*const StubClosure> {
     if closure.is_null() {
         None
@@ -285,30 +274,133 @@ pub extern "C" fn dx_rt_closure_call_void_3_i64_ptr_i1(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_thunk_call_i64(closure: ClosureHandle) -> i64 {
-    closure_env_ptr::<i64>(closure)
-        .map(|ptr| unsafe { *ptr })
-        .unwrap_or(0)
+    let Some(closure_ptr) = closure_ptr(closure) else {
+        return 0;
+    };
+    let closure = unsafe { &*closure_ptr };
+    if !closure.code_ptr.is_null() {
+        return match (closure.env.is_null(), closure.capture_count) {
+            (true, _) => {
+                let fun: extern "C" fn() -> i64 = unsafe { std::mem::transmute(closure.code_ptr) };
+                fun()
+            }
+            (false, 1) => {
+                let capture0 = unsafe { *(closure.env as *const i64) };
+                let fun: extern "C" fn(i64) -> i64 =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(capture0)
+            }
+            (false, 2) => {
+                let env = unsafe { &*(closure.env as *const Capture2I64) };
+                let fun: extern "C" fn(i64, i64) -> i64 =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(env.a, env.b)
+            }
+            _ => 0,
+        };
+    }
+    if closure.env.is_null() {
+        0
+    } else {
+        unsafe { *(closure.env as *const i64) }
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_thunk_call_f64(closure: ClosureHandle) -> f64 {
-    closure_env_ptr::<f64>(closure)
-        .map(|ptr| unsafe { *ptr })
-        .unwrap_or(0.0)
+    let Some(closure_ptr) = closure_ptr(closure) else {
+        return 0.0;
+    };
+    let closure = unsafe { &*closure_ptr };
+    if !closure.code_ptr.is_null() {
+        return match (closure.env.is_null(), closure.capture_count) {
+            (true, _) => {
+                let fun: extern "C" fn() -> f64 = unsafe { std::mem::transmute(closure.code_ptr) };
+                fun()
+            }
+            (false, 1) => {
+                let capture0 = unsafe { *(closure.env as *const f64) };
+                let fun: extern "C" fn(f64) -> f64 =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(capture0)
+            }
+            (false, 2) => {
+                let env = unsafe { &*(closure.env as *const Capture2F64) };
+                let fun: extern "C" fn(f64, f64) -> f64 =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(env.a, env.b)
+            }
+            _ => 0.0,
+        };
+    }
+    if closure.env.is_null() {
+        0.0
+    } else {
+        unsafe { *(closure.env as *const f64) }
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_thunk_call_i1(closure: ClosureHandle) -> bool {
-    closure_env_ptr::<bool>(closure)
-        .map(|ptr| unsafe { *ptr })
-        .unwrap_or(false)
+    let Some(closure_ptr) = closure_ptr(closure) else {
+        return false;
+    };
+    let closure = unsafe { &*closure_ptr };
+    if !closure.code_ptr.is_null() {
+        return match (closure.env.is_null(), closure.capture_count) {
+            (true, _) => {
+                let fun: extern "C" fn() -> bool = unsafe { std::mem::transmute(closure.code_ptr) };
+                fun()
+            }
+            (false, 1) => {
+                let capture0 = unsafe { *(closure.env as *const bool) };
+                let fun: extern "C" fn(bool) -> bool =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(capture0)
+            }
+            (false, 2) => {
+                let env = unsafe { &*(closure.env as *const Capture2I1) };
+                let fun: extern "C" fn(bool, bool) -> bool =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(env.a, env.b)
+            }
+            _ => false,
+        };
+    }
+    if closure.env.is_null() {
+        false
+    } else {
+        unsafe { *(closure.env as *const bool) }
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_thunk_call_ptr(closure: ClosureHandle) -> *mut c_void {
-    closure_env_ptr::<*mut c_void>(closure)
-        .map(|ptr| unsafe { *ptr })
-        .unwrap_or(ptr::null_mut())
+    let Some(closure_ptr) = closure_ptr(closure) else {
+        return ptr::null_mut();
+    };
+    let closure = unsafe { &*closure_ptr };
+    if !closure.code_ptr.is_null() {
+        return match (closure.env.is_null(), closure.capture_count) {
+            (true, _) => {
+                let fun: extern "C" fn() -> *mut c_void =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun()
+            }
+            (false, 1) => {
+                let capture0 = unsafe { *(closure.env as *const *mut c_void) };
+                let fun: extern "C" fn(*mut c_void) -> *mut c_void =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(capture0)
+            }
+            _ => ptr::null_mut(),
+        };
+    }
+    if closure.env.is_null() {
+        ptr::null_mut()
+    } else {
+        unsafe { *(closure.env as *const *mut c_void) }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -450,6 +542,10 @@ mod tests {
         x + 1
     }
 
+    extern "C" fn forty_two() -> i64 {
+        42
+    }
+
     extern "C" fn add_captured(capture: i64, arg: i64) -> i64 {
         capture + arg
     }
@@ -474,6 +570,10 @@ mod tests {
         c0 + c1 + x
     }
 
+    extern "C" fn sum_two_f64_captures(c0: f64, c1: f64) -> f64 {
+        c0 + c1
+    }
+
     extern "C" fn echo_i1(x: bool) -> bool {
         x
     }
@@ -486,6 +586,10 @@ mod tests {
         c0 ^ c1 ^ x
     }
 
+    extern "C" fn xor_two_i1_thunk_captures(c0: bool, c1: bool) -> bool {
+        c0 ^ c1
+    }
+
     extern "C" fn echo_ptr(x: *mut c_void) -> *mut c_void {
         x
     }
@@ -495,6 +599,10 @@ mod tests {
     }
 
     extern "C" fn prepend_capture_ptr(capture: *mut c_void, _arg: i64) -> *mut c_void {
+        capture
+    }
+
+    extern "C" fn ptr_identity_thunk(capture: *mut c_void) -> *mut c_void {
         capture
     }
 
@@ -603,6 +711,10 @@ mod tests {
         c0 + c1 + arg
     }
 
+    extern "C" fn sum_two_i64_captures(c0: i64, c1: i64) -> i64 {
+        c0 + c1
+    }
+
     extern "C" fn add_pair_with_two_captures(c0: i64, c1: i64, x: i64, y: i64) -> i64 {
         c0 + c1 + x + y
     }
@@ -627,6 +739,38 @@ mod tests {
 
         free_closure(closure);
         free_env::<Capture2I64>(env);
+    }
+
+    #[test]
+    fn thunk_calls_can_dispatch_through_code_ptr_with_zero_one_or_two_captures() {
+        let env_i64 = Box::into_raw(Box::new(Capture2I64 { a: 20, b: 22 })) as EnvHandle;
+        let env_f64 = Box::into_raw(Box::new(Capture2F64 { a: 20.0, b: 22.0 })) as EnvHandle;
+        let env_i1 = Box::into_raw(Box::new(Capture2I1 { a: true, b: false })) as EnvHandle;
+        let payload = 0x1234usize as *mut c_void;
+        let env_ptr = Box::into_raw(Box::new(payload)) as EnvHandle;
+
+        let thunk0 = dx_rt_closure_create(forty_two as *mut c_void, ptr::null_mut(), 0, 0);
+        let thunk_i64 = dx_rt_closure_create(sum_two_i64_captures as *mut c_void, env_i64, 0, 2);
+        let thunk_f64 = dx_rt_closure_create(sum_two_f64_captures as *mut c_void, env_f64, 0, 2);
+        let thunk_i1 =
+            dx_rt_closure_create(xor_two_i1_thunk_captures as *mut c_void, env_i1, 0, 2);
+        let thunk_ptr = dx_rt_closure_create(ptr_identity_thunk as *mut c_void, env_ptr, 0, 1);
+
+        assert_eq!(dx_rt_thunk_call_i64(thunk0), 42);
+        assert_eq!(dx_rt_thunk_call_i64(thunk_i64), 42);
+        assert_eq!(dx_rt_thunk_call_f64(thunk_f64), 42.0);
+        assert!(dx_rt_thunk_call_i1(thunk_i1));
+        assert_eq!(dx_rt_thunk_call_ptr(thunk_ptr), payload);
+
+        free_closure(thunk0);
+        free_closure(thunk_i64);
+        free_closure(thunk_f64);
+        free_closure(thunk_i1);
+        free_closure(thunk_ptr);
+        free_env::<Capture2I64>(env_i64);
+        free_env::<Capture2F64>(env_f64);
+        free_env::<Capture2I1>(env_i1);
+        free_env::<*mut c_void>(env_ptr);
     }
 
     #[test]
