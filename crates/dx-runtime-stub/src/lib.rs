@@ -27,6 +27,18 @@ struct Capture2I64 {
 }
 
 #[repr(C)]
+struct Capture2F64 {
+    a: f64,
+    b: f64,
+}
+
+#[repr(C)]
+struct Capture2I1 {
+    a: bool,
+    b: bool,
+}
+
+#[repr(C)]
 struct StubTaggedValue {
     tag: Utf8Ptr,
 }
@@ -112,13 +124,23 @@ pub extern "C" fn dx_rt_closure_call_f64_1_f64(closure: ClosureHandle, arg0: f64
         return 0.0;
     };
     let closure = unsafe { &*closure_ptr };
-    if closure.env.is_null() {
-        let fun: extern "C" fn(f64) -> f64 = unsafe { std::mem::transmute(code_ptr) };
-        fun(arg0)
-    } else {
-        let capture0 = unsafe { *(closure.env as *const f64) };
-        let fun: extern "C" fn(f64, f64) -> f64 = unsafe { std::mem::transmute(code_ptr) };
-        fun(capture0, arg0)
+    match (closure.env.is_null(), closure.capture_count) {
+        (true, _) => {
+            let fun: extern "C" fn(f64) -> f64 = unsafe { std::mem::transmute(code_ptr) };
+            fun(arg0)
+        }
+        (false, 1) => {
+            let capture0 = unsafe { *(closure.env as *const f64) };
+            let fun: extern "C" fn(f64, f64) -> f64 = unsafe { std::mem::transmute(code_ptr) };
+            fun(capture0, arg0)
+        }
+        (false, 2) => {
+            let env = unsafe { &*(closure.env as *const Capture2F64) };
+            let fun: extern "C" fn(f64, f64, f64) -> f64 =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, arg0)
+        }
+        _ => 0.0,
     }
 }
 
@@ -128,13 +150,23 @@ pub extern "C" fn dx_rt_closure_call_i1_1_i1(closure: ClosureHandle, arg0: bool)
         return false;
     };
     let closure = unsafe { &*closure_ptr };
-    if closure.env.is_null() {
-        let fun: extern "C" fn(bool) -> bool = unsafe { std::mem::transmute(code_ptr) };
-        fun(arg0)
-    } else {
-        let capture0 = unsafe { *(closure.env as *const bool) };
-        let fun: extern "C" fn(bool, bool) -> bool = unsafe { std::mem::transmute(code_ptr) };
-        fun(capture0, arg0)
+    match (closure.env.is_null(), closure.capture_count) {
+        (true, _) => {
+            let fun: extern "C" fn(bool) -> bool = unsafe { std::mem::transmute(code_ptr) };
+            fun(arg0)
+        }
+        (false, 1) => {
+            let capture0 = unsafe { *(closure.env as *const bool) };
+            let fun: extern "C" fn(bool, bool) -> bool = unsafe { std::mem::transmute(code_ptr) };
+            fun(capture0, arg0)
+        }
+        (false, 2) => {
+            let env = unsafe { &*(closure.env as *const Capture2I1) };
+            let fun: extern "C" fn(bool, bool, bool) -> bool =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, arg0)
+        }
+        _ => false,
     }
 }
 
@@ -438,12 +470,20 @@ mod tests {
         capture + x
     }
 
+    extern "C" fn add_two_f64_captures(c0: f64, c1: f64, x: f64) -> f64 {
+        c0 + c1 + x
+    }
+
     extern "C" fn echo_i1(x: bool) -> bool {
         x
     }
 
     extern "C" fn xor_i1_capture(capture: bool, x: bool) -> bool {
         capture ^ x
+    }
+
+    extern "C" fn xor_two_i1_captures(c0: bool, c1: bool, x: bool) -> bool {
+        c0 ^ c1 ^ x
     }
 
     extern "C" fn echo_ptr(x: *mut c_void) -> *mut c_void {
@@ -531,6 +571,22 @@ mod tests {
         free_closure(closure_i1);
         free_env::<f64>(env_f64);
         free_env::<bool>(env_i1);
+    }
+
+    #[test]
+    fn ordinary_closure_f64_and_i1_calls_can_dispatch_with_two_captures() {
+        let env_f64 = Box::into_raw(Box::new(Capture2F64 { a: 20.0, b: 18.5 })) as EnvHandle;
+        let env_i1 = Box::into_raw(Box::new(Capture2I1 { a: true, b: false })) as EnvHandle;
+        let closure_f64 = dx_rt_closure_create(add_two_f64_captures as *mut c_void, env_f64, 1, 2);
+        let closure_i1 = dx_rt_closure_create(xor_two_i1_captures as *mut c_void, env_i1, 1, 2);
+
+        assert_eq!(dx_rt_closure_call_f64_1_f64(closure_f64, 3.5), 42.0);
+        assert!(!dx_rt_closure_call_i1_1_i1(closure_i1, true));
+
+        free_closure(closure_f64);
+        free_closure(closure_i1);
+        free_env::<Capture2F64>(env_f64);
+        free_env::<Capture2I1>(env_i1);
     }
 
     #[test]
