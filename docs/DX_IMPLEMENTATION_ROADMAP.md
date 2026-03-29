@@ -67,6 +67,11 @@ The current proof workflow for the runnable executable-entry subset is:
 
 - `scripts/prove_executable_entry_subset.sh`
 
+The next concrete runtime blocker after the current runnable subset is:
+
+- explicit ordinary-closure dispatch, documented in
+  `docs/DX_CLOSURE_DISPATCH_PLAN.md`
+
 ## Compiler Pipeline
 
 The intended pipeline is now:
@@ -93,6 +98,8 @@ Immediate executable-path constraint:
 - the first runnable executable subset is currently narrower than the broader
   executable-entry fixture set, because ordinary closure/thunk runtime hooks are
   still semantic stubs
+- the next executable-runtime milestone is to make ordinary `closure_call_*`
+  dispatch semantically runnable, not just ABI-correct
 
 ## Representation Roles
 

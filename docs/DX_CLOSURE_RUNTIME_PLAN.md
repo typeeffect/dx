@@ -26,6 +26,17 @@ The compiler already has:
 
 This is enough to define a real runtime model.
 
+The repository has now also proven a narrower runnable executable subset via:
+
+- `scripts/prove_executable_entry_subset.sh`
+
+That runnable subset already covers:
+
+- arithmetic
+- captured thunk execution
+
+The main remaining runtime gap is ordinary closure dispatch.
+
 ## Design Goal
 
 Closure lowering should preserve three properties:
@@ -71,6 +82,10 @@ Where:
   - effect metadata if needed later
 
 The exact in-memory layout may remain backend-defined for now, but MIR/runtime must agree on the conceptual model.
+
+The next concrete dispatch step is documented in:
+
+- `docs/DX_CLOSURE_DISPATCH_PLAN.md`
 
 ## Environment Model
 
@@ -198,3 +213,7 @@ This milestone is complete when:
 Do not let LLVM lowering become the place where closure semantics are first decided.
 
 Closure semantics must be fixed one layer earlier.
+
+And do not let runtime stubs silently fake semantic success once the executable
+subset starts running for real. If a path is runnable, it must be runnable for a
+structural reason, not by accident.

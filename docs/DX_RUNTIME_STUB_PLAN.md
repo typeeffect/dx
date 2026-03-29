@@ -126,6 +126,12 @@ Required first behavior:
 - accept env pointer and metadata inputs
 - return a closure handle with enough information for later call/thunk dispatch
 
+Current status:
+
+- partially met for thunk env transport
+- not yet sufficient for ordinary closure dispatch, because the callable entry
+  identity is still missing from the creation ABI
+
 ### `dx_rt_closure_call_*`
 
 Required first behavior:
@@ -134,6 +140,15 @@ Required first behavior:
 - dispatch to the stored callable entry
 - return the ABI-specialized result
 
+Current status:
+
+- ABI shape exists
+- semantic dispatch is not implemented yet
+
+The next required step is documented in:
+
+- `docs/DX_CLOSURE_DISPATCH_PLAN.md`
+
 ### `dx_rt_thunk_call_*`
 
 Required first behavior:
@@ -141,6 +156,11 @@ Required first behavior:
 - accept closure handle
 - call the stored zero-arg entry
 - return the ABI-specialized result
+
+Current status:
+
+- partially semantic for simple captured-env cases in `dx-runtime-stub`
+- still not based on a first-class stored callable entry
 
 ### `dx_rt_match_tag`
 
