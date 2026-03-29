@@ -17,6 +17,13 @@ struct StubClosure {
     code_ptr: *mut c_void,
     env: EnvHandle,
     arity: u32,
+    capture_count: u32,
+}
+
+#[repr(C)]
+struct Capture2I64 {
+    a: i64,
+    b: i64,
 }
 
 #[repr(C)]
@@ -58,8 +65,14 @@ pub extern "C" fn dx_rt_closure_create(
     code_ptr: *mut c_void,
     env: EnvHandle,
     arity: u32,
+    capture_count: u32,
 ) -> ClosureHandle {
-    let closure = Box::new(StubClosure { code_ptr, env, arity });
+    let closure = Box::new(StubClosure {
+        code_ptr,
+        env,
+        arity,
+        capture_count,
+    });
     Box::into_raw(closure) as ClosureHandle
 }
 
@@ -72,14 +85,24 @@ pub extern "C" fn dx_rt_closure_call_i64_1_i64(closure: ClosureHandle, arg0: i64
     if closure.code_ptr.is_null() {
         return 0;
     }
-    if closure.env.is_null() {
-        let fun: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(closure.code_ptr) };
-        fun(arg0)
-    } else {
-        let capture0 = unsafe { *(closure.env as *const i64) };
-        let fun: extern "C" fn(i64, i64) -> i64 =
-            unsafe { std::mem::transmute(closure.code_ptr) };
-        fun(capture0, arg0)
+    match (closure.env.is_null(), closure.capture_count) {
+        (true, _) => {
+            let fun: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(closure.code_ptr) };
+            fun(arg0)
+        }
+        (false, 1) => {
+            let capture0 = unsafe { *(closure.env as *const i64) };
+            let fun: extern "C" fn(i64, i64) -> i64 =
+                unsafe { std::mem::transmute(closure.code_ptr) };
+            fun(capture0, arg0)
+        }
+        (false, 2) => {
+            let env = unsafe { &*(closure.env as *const Capture2I64) };
+            let fun: extern "C" fn(i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(closure.code_ptr) };
+            fun(env.a, env.b, arg0)
+        }
+        _ => 0,
     }
 }
 
@@ -125,13 +148,24 @@ pub extern "C" fn dx_rt_closure_call_i64_2_i64_i64(
         return 0;
     };
     let closure = unsafe { &*closure_ptr };
-    if closure.env.is_null() {
-        let fun: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(code_ptr) };
-        fun(arg0, arg1)
-    } else {
-        let capture0 = unsafe { *(closure.env as *const i64) };
-        let fun: extern "C" fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(code_ptr) };
-        fun(capture0, arg0, arg1)
+    match (closure.env.is_null(), closure.capture_count) {
+        (true, _) => {
+            let fun: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(code_ptr) };
+            fun(arg0, arg1)
+        }
+        (false, 1) => {
+            let capture0 = unsafe { *(closure.env as *const i64) };
+            let fun: extern "C" fn(i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(capture0, arg0, arg1)
+        }
+        (false, 2) => {
+            let env = unsafe { &*(closure.env as *const Capture2I64) };
+            let fun: extern "C" fn(i64, i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, arg0, arg1)
+        }
+        _ => 0,
     }
 }
 
@@ -321,14 +355,14 @@ mod tests {
 
     #[test]
     fn closure_create_returns_handle() {
-        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 0);
+        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 0, 0);
         assert!(!handle.is_null());
         free_closure(handle);
     }
 
     #[test]
     fn thunk_calls_return_default_values() {
-        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 0);
+        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 0, 0);
         assert_eq!(dx_rt_thunk_call_i64(handle), 0);
         assert_eq!(dx_rt_thunk_call_f64(handle), 0.0);
         assert!(!dx_rt_thunk_call_i1(handle));
@@ -345,10 +379,10 @@ mod tests {
         let payload = Box::into_raw(Box::new(123_i64)) as *mut c_void;
         let env_ptr = Box::into_raw(Box::new(payload)) as EnvHandle;
 
-        let thunk_i64 = dx_rt_closure_create(ptr::null_mut(), env_i64, 0);
-        let thunk_f64 = dx_rt_closure_create(ptr::null_mut(), env_f64, 0);
-        let thunk_i1 = dx_rt_closure_create(ptr::null_mut(), env_i1, 0);
-        let thunk_ptr = dx_rt_closure_create(ptr::null_mut(), env_ptr, 0);
+        let thunk_i64 = dx_rt_closure_create(ptr::null_mut(), env_i64, 0, 1);
+        let thunk_f64 = dx_rt_closure_create(ptr::null_mut(), env_f64, 0, 1);
+        let thunk_i1 = dx_rt_closure_create(ptr::null_mut(), env_i1, 0, 1);
+        let thunk_ptr = dx_rt_closure_create(ptr::null_mut(), env_ptr, 0, 1);
 
         assert_eq!(dx_rt_thunk_call_i64(thunk_i64), 42);
         assert_eq!(dx_rt_thunk_call_f64(thunk_f64), 3.5);
@@ -370,7 +404,7 @@ mod tests {
 
     #[test]
     fn closure_call_stubs_return_default_values() {
-        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 1);
+        let handle = dx_rt_closure_create(ptr::null_mut(), ptr::null_mut(), 1, 0);
         assert_eq!(dx_rt_closure_call_i64_1_i64(handle, 7), 0);
         assert_eq!(dx_rt_closure_call_i64_2_i64_i64(handle, 7, 9), 0);
         assert!(dx_rt_closure_call_ptr_1_ptr(handle, ptr::null_mut()).is_null());
@@ -426,12 +460,12 @@ mod tests {
 
     #[test]
     fn ordinary_closure_calls_dispatch_through_code_ptr_without_env() {
-        let c1 = dx_rt_closure_create(plus_one as *mut c_void, ptr::null_mut(), 1);
-        let c2 = dx_rt_closure_create(add_pair as *mut c_void, ptr::null_mut(), 2);
-        let c3 = dx_rt_closure_create(echo_ptr as *mut c_void, ptr::null_mut(), 1);
-        let c4 = dx_rt_closure_create(int_to_ptr as *mut c_void, ptr::null_mut(), 1);
-        let c5 = dx_rt_closure_create(echo_f64 as *mut c_void, ptr::null_mut(), 1);
-        let c6 = dx_rt_closure_create(echo_i1 as *mut c_void, ptr::null_mut(), 1);
+        let c1 = dx_rt_closure_create(plus_one as *mut c_void, ptr::null_mut(), 1, 0);
+        let c2 = dx_rt_closure_create(add_pair as *mut c_void, ptr::null_mut(), 2, 0);
+        let c3 = dx_rt_closure_create(echo_ptr as *mut c_void, ptr::null_mut(), 1, 0);
+        let c4 = dx_rt_closure_create(int_to_ptr as *mut c_void, ptr::null_mut(), 1, 0);
+        let c5 = dx_rt_closure_create(echo_f64 as *mut c_void, ptr::null_mut(), 1, 0);
+        let c6 = dx_rt_closure_create(echo_i1 as *mut c_void, ptr::null_mut(), 1, 0);
         let payload = 0x55usize as *mut c_void;
 
         assert_eq!(dx_rt_closure_call_i64_1_i64(c1, 41), 42);
@@ -452,7 +486,7 @@ mod tests {
     #[test]
     fn ordinary_closure_i64_call_can_dispatch_with_single_i64_capture() {
         let env = Box::into_raw(Box::new(41_i64)) as EnvHandle;
-        let closure = dx_rt_closure_create(add_captured as *mut c_void, env, 1);
+        let closure = dx_rt_closure_create(add_captured as *mut c_void, env, 1, 1);
 
         assert_eq!(dx_rt_closure_call_i64_1_i64(closure, 1), 42);
 
@@ -463,7 +497,7 @@ mod tests {
     #[test]
     fn ordinary_closure_i64_pair_call_can_dispatch_with_single_i64_capture() {
         let env = Box::into_raw(Box::new(40_i64)) as EnvHandle;
-        let closure = dx_rt_closure_create(add_pair_with_capture as *mut c_void, env, 2);
+        let closure = dx_rt_closure_create(add_pair_with_capture as *mut c_void, env, 2, 1);
 
         assert_eq!(dx_rt_closure_call_i64_2_i64_i64(closure, 1, 1), 42);
 
@@ -475,7 +509,7 @@ mod tests {
     fn ordinary_closure_ptr_return_can_dispatch_with_single_ptr_capture() {
         let payload = 0x1234usize as *mut c_void;
         let env = Box::into_raw(Box::new(payload)) as EnvHandle;
-        let closure = dx_rt_closure_create(prepend_capture_ptr as *mut c_void, env, 1);
+        let closure = dx_rt_closure_create(prepend_capture_ptr as *mut c_void, env, 1, 1);
 
         assert_eq!(dx_rt_closure_call_ptr_1_i64(closure, 7), payload);
 
@@ -487,8 +521,8 @@ mod tests {
     fn ordinary_closure_f64_and_i1_calls_can_dispatch_with_single_capture() {
         let env_f64 = Box::into_raw(Box::new(38.5_f64)) as EnvHandle;
         let env_i1 = Box::into_raw(Box::new(true)) as EnvHandle;
-        let closure_f64 = dx_rt_closure_create(add_f64_capture as *mut c_void, env_f64, 1);
-        let closure_i1 = dx_rt_closure_create(xor_i1_capture as *mut c_void, env_i1, 1);
+        let closure_f64 = dx_rt_closure_create(add_f64_capture as *mut c_void, env_f64, 1, 1);
+        let closure_i1 = dx_rt_closure_create(xor_i1_capture as *mut c_void, env_i1, 1, 1);
 
         assert_eq!(dx_rt_closure_call_f64_1_f64(closure_f64, 3.5), 42.0);
         assert!(!dx_rt_closure_call_i1_1_i1(closure_i1, true));
@@ -502,10 +536,41 @@ mod tests {
     #[test]
     fn closure_create_preserves_code_pointer() {
         let sentinel = 0x1234usize as *mut c_void;
-        let handle = dx_rt_closure_create(sentinel, ptr::null_mut(), 1);
+        let handle = dx_rt_closure_create(sentinel, ptr::null_mut(), 1, 0);
         let closure = unsafe { &*(handle as *const StubClosure) };
         assert_eq!(closure.code_ptr, sentinel);
+        assert_eq!(closure.capture_count, 0);
         free_closure(handle);
+    }
+
+    extern "C" fn add_two_captures(c0: i64, c1: i64, arg: i64) -> i64 {
+        c0 + c1 + arg
+    }
+
+    extern "C" fn add_pair_with_two_captures(c0: i64, c1: i64, x: i64, y: i64) -> i64 {
+        c0 + c1 + x + y
+    }
+
+    #[test]
+    fn ordinary_closure_i64_call_can_dispatch_with_two_i64_captures() {
+        let env = Box::into_raw(Box::new(Capture2I64 { a: 20, b: 21 })) as EnvHandle;
+        let closure = dx_rt_closure_create(add_two_captures as *mut c_void, env, 1, 2);
+
+        assert_eq!(dx_rt_closure_call_i64_1_i64(closure, 1), 42);
+
+        free_closure(closure);
+        free_env::<Capture2I64>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_i64_pair_call_can_dispatch_with_two_i64_captures() {
+        let env = Box::into_raw(Box::new(Capture2I64 { a: 19, b: 20 })) as EnvHandle;
+        let closure = dx_rt_closure_create(add_pair_with_two_captures as *mut c_void, env, 2, 2);
+
+        assert_eq!(dx_rt_closure_call_i64_2_i64_i64(closure, 1, 2), 42);
+
+        free_closure(closure);
+        free_env::<Capture2I64>(env);
     }
 
     #[test]

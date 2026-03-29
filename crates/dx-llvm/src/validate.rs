@@ -1211,7 +1211,7 @@ mod tests {
             globals: vec![],
             externs: vec![ExternDecl {
                 symbol: "dx_rt_closure_create",
-                params: vec![Type::Ptr, Type::Ptr, Type::I64],
+                params: vec![Type::Ptr, Type::Ptr, Type::I64, Type::I64],
                 ret: Type::Ptr,
             }],
             functions: vec![
@@ -1237,6 +1237,7 @@ mod tests {
                                     Operand::Global("f$closure$0".into(), Type::Ptr),
                                     Operand::Register("%1".into(), Type::Ptr),
                                     Operand::ConstInt(0),
+                                    Operand::ConstInt(1),
                                 ],
                                 comment: None,
                             },
@@ -1266,7 +1267,7 @@ mod tests {
             globals: vec![],
             externs: vec![ExternDecl {
                 symbol: "dx_rt_closure_create",
-                params: vec![Type::Ptr, Type::Ptr, Type::I64],
+                params: vec![Type::Ptr, Type::Ptr, Type::I64, Type::I64],
                 ret: Type::Ptr,
             }],
             functions: vec![Function {
@@ -1284,6 +1285,7 @@ mod tests {
                         ret: Type::Ptr,
                         args: vec![
                             Operand::Register("%0".into(), Type::Ptr),
+                            Operand::ConstInt(0),
                             Operand::ConstInt(0),
                             Operand::ConstInt(0),
                         ],

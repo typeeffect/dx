@@ -243,6 +243,7 @@ fn lower_instructions(step: &LowStep, state: &mut LoweringState) -> Vec<Instruct
                             Operand::Global(entry_function.clone(), Type::Ptr),
                             Operand::Register(env, Type::Ptr),
                             Operand::ConstInt(*arity as i64),
+                            Operand::ConstInt(captures.len() as i64),
                         ],
                         comment: Some(format!("stmt={statement}, {}", runtime_call_comment(kind))),
                     },
