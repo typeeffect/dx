@@ -33,6 +33,12 @@ pub struct ExecutableTools {
     pub cc: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutableRunResult {
+    pub executable_path: PathBuf,
+    pub exit_code: Option<i32>,
+}
+
 #[derive(Debug)]
 pub enum ExecutableBuildError {
     Pipeline(PipelineError),
@@ -227,6 +233,30 @@ pub fn materialize_verified_executable_plan(
     execute_link_plan(&plan.source.executable.link_plan, tools)
 }
 
+pub fn run_executable(executable_path: &Path) -> Result<ExecutableRunResult, ExecutableBuildError> {
+    let output = Command::new(executable_path).output()?;
+    Ok(ExecutableRunResult {
+        executable_path: executable_path.to_path_buf(),
+        exit_code: output.status.code(),
+    })
+}
+
+pub fn build_and_run_source_executable_plan(
+    plan: &SourceExecutablePlan,
+    tools: &ExecutableTools,
+) -> Result<ExecutableRunResult, ExecutableBuildError> {
+    materialize_source_executable_plan(plan, tools)?;
+    run_executable(&plan.executable.executable_path)
+}
+
+pub fn build_and_run_verified_executable_plan(
+    plan: &VerifiedExecutablePlan,
+    tools: &ExecutableTools,
+) -> Result<ExecutableRunResult, ExecutableBuildError> {
+    materialize_verified_executable_plan(plan, tools)?;
+    run_executable(&plan.source.executable.executable_path)
+}
+
 pub fn default_runtime_archive_path() -> PathBuf {
     if let Some(path) = configured_runtime_archive_with_env(|key| env::var_os(key)) {
         return path;
@@ -353,6 +383,12 @@ mod tests {
         path.pop();
         path.push("examples/backend");
         path.push(name);
+        path
+    }
+
+    fn temp_source(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, body).expect("write source");
         path
     }
 
@@ -635,5 +671,70 @@ mod tests {
         .unwrap();
 
         assert_eq!(path, PathBuf::from("/tmp/custom/libdx_runtime_stub.a"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_executable_reports_exit_code() {
+        let base = temp_dir();
+        let executable = write_script(&base, "demo-exec", "exit 7");
+
+        let result = run_executable(&executable).expect("run executable");
+
+        assert_eq!(
+            result,
+            ExecutableRunResult {
+                executable_path: executable,
+                exit_code: Some(7),
+            }
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn build_and_run_source_plan_runs_materialized_program() {
+        let base = temp_dir();
+        let log = base.join("log.txt");
+        let llvm_as = write_script(
+            &base,
+            "llvm-as",
+            "output=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then\n    shift\n    output=\"$1\"\n    break\n  fi\n  shift\ndone\n: > \"$output\"\n",
+        );
+        let llc = write_script(
+            &base,
+            "llc",
+            "output=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then\n    shift\n    output=\"$1\"\n    break\n  fi\n  shift\ndone\n: > \"$output\"\n",
+        );
+        let cc = write_script(
+            &base,
+            "cc",
+            &format!(
+                "echo cc >> {}\noutput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then\n    shift\n    output=\"$1\"\n    break\n  fi\n  shift\ndone\ncat <<'EOF' > \"$output\"\n#!/bin/sh\nexit 5\nEOF\nchmod +x \"$output\"\n",
+                log.display()
+            ),
+        );
+        let source = temp_source(&base, "main.dx", "fun main() -> Int:\n    0\n.\n");
+        let runtime = base.join("libdx_runtime_stub.a");
+        fs::write(&runtime, "").expect("write runtime");
+        let build_dir = base.join("build");
+        let mut plan = build_source_executable_plan(&source, &build_dir);
+        plan.executable.runtime_archive = runtime.clone();
+        plan.executable.link_plan = build_link_command_plan(
+            &plan.executable.ll_path,
+            &runtime,
+            &plan.executable.executable_path,
+        );
+        let tools = ExecutableTools { llvm_as, llc, cc };
+
+        let result = build_and_run_source_executable_plan(&plan, &tools).expect("build and run");
+
+        assert_eq!(result.executable_path, plan.executable.executable_path);
+        assert_eq!(result.exit_code, Some(5));
+        let contents = fs::read_to_string(&log).expect("read log");
+        assert!(contents.contains("cc"), "got:\n{contents}");
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
