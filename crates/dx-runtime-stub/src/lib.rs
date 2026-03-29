@@ -66,6 +66,13 @@ struct Capture2Ptr {
 }
 
 #[repr(C)]
+struct Capture3Ptr {
+    a: *mut c_void,
+    b: *mut c_void,
+    c: *mut c_void,
+}
+
+#[repr(C)]
 struct CapturePtrI64 {
     p: *mut c_void,
     i: i64,
@@ -280,6 +287,12 @@ pub extern "C" fn dx_rt_closure_call_ptr_1_ptr(
             let fun: extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void =
                 unsafe { std::mem::transmute(code_ptr) };
             fun(env.a, env.b, arg0)
+        }
+        (false, 3) => {
+            let env = unsafe { &*(closure.env as *const Capture3Ptr) };
+            let fun: extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, env.c, arg0)
         }
         _ => ptr::null_mut(),
     }
@@ -791,6 +804,15 @@ mod tests {
         c0
     }
 
+    extern "C" fn third_ptr_with_ptr_arg(
+        _c0: *mut c_void,
+        _c1: *mut c_void,
+        c2: *mut c_void,
+        _arg: *mut c_void,
+    ) -> *mut c_void {
+        c2
+    }
+
     extern "C" fn second_ptr_with_mixed_args(
         _c0: *mut c_void,
         c1: i64,
@@ -933,6 +955,28 @@ mod tests {
         free_closure(c2);
         free_closure(c3);
         free_env::<Capture2Ptr>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_ptr_return_can_dispatch_with_three_ptr_captures() {
+        let payload0 = 0x1234usize as *mut c_void;
+        let payload1 = 0x5678usize as *mut c_void;
+        let payload2 = 0x9abcusize as *mut c_void;
+        let env = Box::into_raw(Box::new(Capture3Ptr {
+            a: payload0,
+            b: payload1,
+            c: payload2,
+        })) as EnvHandle;
+
+        let closure = dx_rt_closure_create(third_ptr_with_ptr_arg as *mut c_void, env, 1, 3);
+
+        assert_eq!(
+            dx_rt_closure_call_ptr_1_ptr(closure, 0xffffusize as *mut c_void),
+            payload2
+        );
+
+        free_closure(closure);
+        free_env::<Capture3Ptr>(env);
     }
 
     #[test]
