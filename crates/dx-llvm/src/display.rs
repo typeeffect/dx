@@ -421,12 +421,15 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_match_terminator() {
+    fn snapshot_match_lowered_to_cond_checks() {
         let out = render(
             "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        Err(_):\n            0\n    .\n.\n",
         );
-        assert!(out.contains("match "), "got:\n{out}");
-        assert!(out.contains("else %"), "got:\n{out}");
+        // Match is now lowered to dx_rt_match_tag calls + CondBr chains
+        assert!(out.contains("@dx_rt_match_tag"), "match_tag call:\n{out}");
+        assert!(out.contains("br "), "branch instruction:\n{out}");
+        // No raw MatchBr should remain
+        assert!(!out.contains("match ptr"), "raw MatchBr should not appear:\n{out}");
     }
 
     #[test]

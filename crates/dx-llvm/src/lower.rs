@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 pub fn lower_module(low: &LowModule) -> Module {
     let mut state = LoweringState::default();
-    let externs = low
+    let mut externs: Vec<ExternDecl> = low
         .externs
         .iter()
         .map(|ext| ExternDecl {
@@ -20,11 +20,21 @@ pub fn lower_module(low: &LowModule) -> Module {
         })
         .collect();
 
-    let functions = low
+    let functions: Vec<Function> = low
         .functions
         .iter()
         .map(|function| lower_function(function, &mut state))
         .collect();
+
+    // If match lowering was used, inject the match_tag runtime extern
+    if state.needs_match_tag {
+        externs.push(ExternDecl {
+            symbol: "dx_rt_match_tag",
+            params: vec![Type::Ptr, Type::Ptr],
+            ret: Type::I1,
+        });
+        externs.sort_by_key(|e| e.symbol);
+    }
 
     Module {
         globals: state.globals,
@@ -37,6 +47,7 @@ pub fn lower_module(low: &LowModule) -> Module {
 struct LoweringState {
     globals: Vec<GlobalString>,
     string_pool: BTreeMap<String, String>,
+    needs_match_tag: bool,
 }
 
 impl LoweringState {
@@ -56,6 +67,37 @@ impl LoweringState {
 }
 
 fn lower_function(function: &low::LowFunction, state: &mut LoweringState) -> Function {
+    let mut extra_blocks: Vec<Block> = Vec::new();
+    let mut block_counter = function.blocks.len();
+
+    let blocks: Vec<Block> = function
+        .blocks
+        .iter()
+        .map(|block| {
+            let instructions: Vec<Instruction> = block
+                .steps
+                .iter()
+                .flat_map(|step| lower_instructions(step, state))
+                .collect();
+
+            let terminator = lower_terminator_maybe_expand(
+                &block.terminator,
+                state,
+                &mut extra_blocks,
+                &mut block_counter,
+            );
+
+            Block {
+                label: block.label.clone(),
+                instructions,
+                terminator,
+            }
+        })
+        .collect();
+
+    let mut all_blocks = blocks;
+    all_blocks.append(&mut extra_blocks);
+
     Function {
         name: function.name.clone(),
         params: function
@@ -67,23 +109,16 @@ fn lower_function(function: &low::LowFunction, state: &mut LoweringState) -> Fun
             })
             .collect(),
         ret: lower_type(&function.ret),
-        blocks: function
-            .blocks
-            .iter()
-            .map(|block| Block {
-                label: block.label.clone(),
-                instructions: block
-                    .steps
-                    .iter()
-                    .flat_map(|step| lower_instructions(step, state))
-                    .collect(),
-                terminator: lower_terminator(&block.terminator, state),
-            })
-            .collect(),
+        blocks: all_blocks,
     }
 }
 
-fn lower_terminator(term: &LowTerminator, state: &mut LoweringState) -> Terminator {
+fn lower_terminator_maybe_expand(
+    term: &LowTerminator,
+    state: &mut LoweringState,
+    extra_blocks: &mut Vec<Block>,
+    block_counter: &mut usize,
+) -> Terminator {
     match term {
         LowTerminator::Return(value) => {
             Terminator::Ret(value.as_ref().map(|value| lower_value(value, state)))
@@ -102,11 +137,59 @@ fn lower_terminator(term: &LowTerminator, state: &mut LoweringState) -> Terminat
             scrutinee,
             arms,
             fallback,
-        } => Terminator::MatchBr {
-            scrutinee: lower_value(scrutinee, state),
-            arms: arms.clone(),
-            fallback: fallback.clone(),
-        },
+        } => {
+            state.needs_match_tag = true;
+
+            if arms.is_empty() {
+                return Terminator::Br(fallback.clone());
+            }
+
+            let scrutinee_op = lower_value(scrutinee, state);
+
+            // Generate one check block per arm. Each block:
+            //   1. calls dx_rt_match_tag(scrutinee, "Pattern") -> i1
+            //   2. if true: branch to arm body
+            //   3. if false: branch to next check (or fallback)
+            let mut check_labels: Vec<String> = Vec::new();
+            for _ in 0..arms.len() {
+                let label = format!("match_check_{}", *block_counter);
+                *block_counter += 1;
+                check_labels.push(label);
+            }
+
+            for (i, (pattern, target)) in arms.iter().enumerate() {
+                let next = if i + 1 < arms.len() {
+                    check_labels[i + 1].clone()
+                } else {
+                    fallback.clone()
+                };
+
+                let cmp_name = format!("%match_cmp_{}", &check_labels[i]);
+                let tag_global = state.intern_string(pattern);
+
+                extra_blocks.push(Block {
+                    label: check_labels[i].clone(),
+                    instructions: vec![Instruction::CallExtern {
+                        result: Some(cmp_name.clone()),
+                        symbol: "dx_rt_match_tag",
+                        ret: Type::I1,
+                        args: vec![
+                            scrutinee_op.clone(),
+                            Operand::Global(tag_global, Type::Ptr),
+                        ],
+                        comment: Some(format!("match pattern={pattern}")),
+                    }],
+                    terminator: Terminator::CondBr {
+                        cond: Operand::Register(cmp_name, Type::I1),
+                        then_label: target.clone(),
+                        else_label: next,
+                    },
+                });
+            }
+
+            // Current block branches to first check
+            Terminator::Br(check_labels[0].clone())
+        }
         LowTerminator::Unreachable => Terminator::Unreachable,
     }
 }
@@ -187,13 +270,19 @@ fn runtime_call_args(kind: &LowRuntimeCallKind, state: &mut LoweringState) -> Ve
         LowRuntimeCallKind::ClosureCreate { .. } => unreachable!("closure create lowered separately"),
         LowRuntimeCallKind::ClosureInvoke {
             closure,
-            arg_count,
+            args,
             thunk,
             ..
         } => {
             let mut out = vec![lower_value(closure, state)];
             if !thunk {
-                out.push(Operand::ConstInt(i64::from(*arg_count)));
+                // Pass actual call arguments after the closure handle
+                for arg in args {
+                    match arg {
+                        LowCallArg::Positional(value) => out.push(lower_value(value, state)),
+                        LowCallArg::Named { value, .. } => out.push(lower_value(value, state)),
+                    }
+                }
             }
             out
         }
@@ -453,7 +542,7 @@ mod tests {
     }
 
     #[test]
-    fn lowers_match_to_match_br() {
+    fn lowers_match_to_cond_br_chain() {
         let mir = typed_mir(
             "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        Err(_):\n            0\n    .\n.\n",
         );
@@ -461,9 +550,40 @@ mod tests {
         let llvm = lower_module(&low);
         let f = llvm.functions.iter().find(|f| f.name == "f").expect("f");
 
-        assert!(f.blocks.iter().any(|bb| matches!(
-            bb.terminator,
-            Terminator::MatchBr { .. }
-        )));
+        // Match should be lowered to check blocks with CondBr, not MatchBr
+        assert!(
+            !f.blocks.iter().any(|bb| matches!(bb.terminator, Terminator::MatchBr { .. })),
+            "should not contain MatchBr after lowering"
+        );
+        // Should have check blocks with dx_rt_match_tag calls
+        assert!(f.blocks.iter().any(|bb| bb.instructions.iter().any(|it| matches!(
+            it,
+            Instruction::CallExtern { symbol, .. } if *symbol == "dx_rt_match_tag"
+        ))));
+        // Should have dx_rt_match_tag extern
+        assert!(llvm.externs.iter().any(|e| e.symbol == "dx_rt_match_tag"));
+    }
+
+    #[test]
+    fn closure_call_passes_real_args() {
+        let mir = typed_mir(
+            "fun run(x: Int) -> Int:\n    val f = (y: Int) => x + y\n    f(1)\n.\n",
+        );
+        let low = dx_codegen::lower_module(&mir);
+        let llvm = lower_module(&low);
+        let run = llvm.functions.iter().find(|f| f.name == "run").expect("run");
+
+        // Find the closure call instruction
+        let closure_call = run.blocks[0].instructions.iter().find(|it| matches!(
+            it,
+            Instruction::CallExtern { symbol, .. } if symbol.starts_with("dx_rt_closure_call")
+        ));
+        assert!(closure_call.is_some(), "should have closure call");
+        if let Some(Instruction::CallExtern { args, .. }) = closure_call {
+            // First arg: closure handle (ptr)
+            assert!(matches!(args[0], Operand::Register(_, Type::Ptr)), "first arg should be closure handle");
+            // Should have more than just closure handle — should have the actual call arg
+            assert!(args.len() > 1, "closure call should pass real args, got {} args", args.len());
+        }
     }
 }

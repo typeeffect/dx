@@ -16,6 +16,12 @@ pub struct SourceExecutablePlan {
     pub executable: ExecutablePlan,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedExecutablePlan {
+    pub source: SourceExecutablePlan,
+    pub verify_emit_command: Vec<String>,
+}
+
 pub fn build_executable_plan_from_ll(
     ll_path: &Path,
     runtime_archive: &Path,
@@ -56,10 +62,31 @@ pub fn build_source_executable_plan(input_dx: &Path, build_dir: &Path) -> Source
     }
 }
 
+pub fn build_verified_executable_plan(input_dx: &Path, build_dir: &Path) -> VerifiedExecutablePlan {
+    let source = build_source_executable_plan(input_dx, build_dir);
+    let verify_emit_command = vec![
+        "dx-emit-llvm".to_string(),
+        "--verify".to_string(),
+        input_dx.display().to_string(),
+        source.executable.ll_path.display().to_string(),
+    ];
+
+    VerifiedExecutablePlan {
+        source,
+        verify_emit_command,
+    }
+}
+
 pub fn render_source_executable_plan(plan: &SourceExecutablePlan) -> String {
     let emit = plan.emit_command.join(" ");
     let link = crate::link::render_link_plan(&plan.executable.link_plan);
     [emit, link].join("\n")
+}
+
+pub fn render_verified_executable_plan(plan: &VerifiedExecutablePlan) -> String {
+    let verify_emit = plan.verify_emit_command.join(" ");
+    let link = crate::link::render_link_plan(&plan.source.executable.link_plan);
+    [verify_emit, link].join("\n")
 }
 
 pub fn default_runtime_archive_path() -> PathBuf {
@@ -163,5 +190,37 @@ mod tests {
         );
 
         assert_eq!(render_source_executable_plan(&a), render_source_executable_plan(&b));
+    }
+
+    #[test]
+    fn verified_plan_includes_verify_emit_step() {
+        let plan = build_verified_executable_plan(
+            Path::new("examples/demo.dx"),
+            Path::new("build"),
+        );
+
+        assert_eq!(
+            plan.verify_emit_command,
+            vec![
+                "dx-emit-llvm".to_string(),
+                "--verify".to_string(),
+                "examples/demo.dx".to_string(),
+                "build/demo.ll".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rendered_verified_plan_is_deterministic() {
+        let a = build_verified_executable_plan(
+            Path::new("examples/demo.dx"),
+            Path::new("build"),
+        );
+        let b = build_verified_executable_plan(
+            Path::new("examples/demo.dx"),
+            Path::new("build"),
+        );
+
+        assert_eq!(render_verified_executable_plan(&a), render_verified_executable_plan(&b));
     }
 }

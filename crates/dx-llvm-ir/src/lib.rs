@@ -8,10 +8,13 @@ pub use exec::{
     build_executable_plan_from_ll,
     build_executable_plan_from_source,
     build_source_executable_plan,
+    build_verified_executable_plan,
     default_runtime_archive_path,
     render_source_executable_plan,
+    render_verified_executable_plan,
     ExecutablePlan,
     SourceExecutablePlan,
+    VerifiedExecutablePlan,
 };
 pub use emit::{emit_module, EmitError};
 pub use link::{build_link_command_plan, render_link_plan, LinkCommandPlan};

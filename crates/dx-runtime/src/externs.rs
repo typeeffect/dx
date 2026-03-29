@@ -40,7 +40,7 @@ pub fn build_runtime_extern_plan(plan: &RuntimeOpsPlan) -> RuntimeExternPlan {
     let mut externs: Vec<_> = plan
         .required_hooks
         .iter()
-        .copied()
+        .cloned()
         .map(runtime_extern_for_hook)
         .collect();
     externs.sort_by(|a, b| a.signature.symbol.cmp(b.signature.symbol));
@@ -72,7 +72,7 @@ fn runtime_extern_for_hook(hook: RuntimeHookKind) -> RuntimeExtern {
                 sig.symbol,
             )
         }
-        RuntimeHookKind::Closure(closure_hook) => {
+        RuntimeHookKind::Closure(ref closure_hook) => {
             let sig = closure_hook.signature();
             (
                 sig.params.iter().copied().map(from_closure_abi).collect(),
@@ -179,7 +179,7 @@ mod tests {
         );
         let plan = build_runtime_extern_plan_from_module(&module);
 
-        let hooks: Vec<_> = plan.externs.iter().map(|it| it.hook).collect();
+        let hooks: Vec<_> = plan.externs.iter().map(|it| it.hook.clone()).collect();
         assert!(hooks.contains(&RuntimeHookKind::Py(RuntimeHook::PyCallFunction)));
         assert!(hooks.contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::Create)));
         assert!(hooks.contains(&RuntimeHookKind::Closure(ClosureRuntimeHook::ThunkCall(
@@ -231,6 +231,7 @@ mod tests {
         let plan = build_runtime_extern_plan(&RuntimeOpsPlan {
             required_hooks: vec![RuntimeHookKind::Closure(ClosureRuntimeHook::Call(
                 crate::closure::ClosureReturnAbi::Ptr,
+                vec![crate::closure::ClosureAbiType::I64].into_boxed_slice(),
             ))],
             ops: vec![],
         });
@@ -240,12 +241,13 @@ mod tests {
             vec![RuntimeExtern {
                 hook: RuntimeHookKind::Closure(ClosureRuntimeHook::Call(
                     crate::closure::ClosureReturnAbi::Ptr,
+                    vec![crate::closure::ClosureAbiType::I64].into_boxed_slice(),
                 )),
                 signature: RuntimeExternSignature {
-                    symbol: "dx_rt_closure_call_ptr",
+                    symbol: "dx_rt_closure_call_ptr_1_i64",
                     params: vec![
                         RuntimeExternAbiType::ClosureHandle,
-                        RuntimeExternAbiType::U32,
+                        RuntimeExternAbiType::I64,
                     ],
                     ret: RuntimeExternAbiType::Ptr,
                 },

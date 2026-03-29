@@ -78,12 +78,15 @@ fn if_else_control_flow() {
 
 #[test]
 fn match_control_flow() {
-    let (_low, llvm) = pipeline(
+    let (low, llvm) = pipeline(
         "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        Err(_):\n            0\n    .\n.\n",
     );
 
-    assert!(llvm.contains("match "), "llvm match:\n{llvm}");
-    assert!(llvm.contains("else %"), "llvm fallback:\n{llvm}");
+    // Low level still has match terminator
+    assert!(low.contains("match "), "low match:\n{low}");
+    // LLVM level: match is lowered to dx_rt_match_tag calls + CondBr
+    assert!(llvm.contains("@dx_rt_match_tag"), "llvm match_tag:\n{llvm}");
+    assert!(!llvm.contains("match ptr"), "raw MatchBr should be gone:\n{llvm}");
 }
 
 // ── mixed Python + closure ───────────────────────────────────────

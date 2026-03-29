@@ -210,15 +210,13 @@ fn emit_thunk_deterministic() {
 // ── intentionally unsupported cases ─────────────────────────────
 
 #[test]
-fn emit_rejects_match_with_unsupported_terminator() {
+fn emit_match_now_succeeds_through_lowered_chain() {
+    // Match is now lowered to dx_rt_match_tag + CondBr before reaching emitter
     let module = llvm_module(
         "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        _:\n            0\n    .\n.\n",
     );
-    let err = emit_module(&module).expect_err("match should be unsupported");
-    assert!(
-        matches!(err, dx_llvm_ir::EmitError::UnsupportedTerminator("match")),
-        "expected UnsupportedTerminator(match), got: {:?}", err
-    );
+    let ir = emit_module(&module).expect("match should now emit");
+    assert!(ir.contains("@dx_rt_match_tag"), "match_tag:\n{ir}");
 }
 
 #[test]
@@ -351,15 +349,13 @@ fn emit_empty_string_global_as_call_arg() {
 #[test]
 fn emit_match_fails_even_with_supported_arithmetic() {
     // A function with both arithmetic (supported) and match (unsupported)
-    // should fail specifically because of match, not arithmetic
+    // match + arithmetic should now emit successfully
     let module = llvm_module(
         "fun f(x: Result) -> Int:\n    val y = 1 + 2\n    match x:\n        Ok(v):\n            v\n        _:\n            y\n    .\n.\n",
     );
-    let err = emit_module(&module).expect_err("should fail on match");
-    assert!(
-        matches!(err, dx_llvm_ir::EmitError::UnsupportedTerminator("match")),
-        "error should be specifically about match: {:?}", err
-    );
+    let ir = emit_module(&module).expect("match + arithmetic should now emit");
+    assert!(ir.contains("@dx_rt_match_tag"), "match_tag:\n{ir}");
+    assert!(ir.contains("add i64"), "arithmetic:\n{ir}");
 }
 
 // ── mixed closure + string scenarios ─────────────────────────────
@@ -484,4 +480,124 @@ fn validator_rejects_cross_block_use_without_dominance() {
         "validator should reject non-dominating cross-block use: {:?}",
         report.diagnostics
     );
+}
+
+// ── closure-call ABI: real args in emitted IR ────────────────────
+
+#[test]
+fn emit_closure_call_with_int_arg() {
+    let ir = emit("fun f(x: Int) -> Int:\n    val g = (y: Int) => x + y\n    g(1)\n.\n");
+    // Should have closure_call_i64 with more than just the closure handle
+    assert!(ir.contains("closure_call_i64") || ir.contains("closure_call"), "closure call:\n{ir}");
+    assert!(ir.contains("@dx_rt_closure_create"), "create:\n{ir}");
+}
+
+#[test]
+fn emit_closure_call_with_str_arg() {
+    let ir = emit("fun f(s: Str) -> Str:\n    val g = (x: Str) => x\n    g(s)\n.\n");
+    assert!(ir.contains("closure_call_ptr") || ir.contains("closure_call"), "closure call:\n{ir}");
+    assert!(ir.contains("@dx_rt_closure_create"), "create:\n{ir}");
+}
+
+#[test]
+fn emit_closure_call_mixed_with_arithmetic() {
+    let ir = emit("fun f(x: Int) -> Int:\n    val g = (y: Int) => y + 1\n    val r = g(x)\n    r + 2\n.\n");
+    assert!(ir.contains("add i64"), "arithmetic:\n{ir}");
+    assert!(ir.contains("closure_call"), "closure call:\n{ir}");
+}
+
+// ── match: real textual IR emission ──────────────────────────────
+
+#[test]
+fn emit_match_with_arithmetic() {
+    let ir = emit("fun f(x: Result) -> Int:\n    val y = 1 + 2\n    match x:\n        Ok(v):\n            v\n        _:\n            y\n    .\n.\n");
+    assert!(ir.contains("@dx_rt_match_tag"), "match_tag:\n{ir}");
+    assert!(ir.contains("add i64"), "arithmetic:\n{ir}");
+    assert!(ir.contains("br "), "branch:\n{ir}");
+}
+
+#[test]
+fn emit_multi_arm_match() {
+    let ir = emit("fun f(x: T) -> Int:\n    match x:\n        A(v):\n            1\n        B(v):\n            2\n        _:\n            0\n    .\n.\n");
+    assert!(ir.contains("@dx_rt_match_tag"), "match_tag:\n{ir}");
+    // Should have multiple match_tag calls (one per named arm)
+    let match_count = ir.matches("@dx_rt_match_tag").count();
+    assert!(match_count >= 2, "expected >=2 match_tag calls, got {match_count}:\n{ir}");
+}
+
+#[test]
+fn emit_raw_match_br_still_rejected() {
+    use dx_llvm::llvm::*;
+    let module = Module {
+        globals: vec![],
+        externs: vec![],
+        functions: vec![Function {
+            name: "f".into(),
+            params: vec![],
+            ret: Type::I64,
+            blocks: vec![Block {
+                label: "bb0".into(),
+                instructions: vec![],
+                terminator: Terminator::MatchBr {
+                    scrutinee: Operand::ConstInt(0),
+                    arms: vec![],
+                    fallback: "bb0".into(),
+                },
+            }],
+        }],
+    };
+    let err = emit_module(&module).expect_err("raw MatchBr rejected");
+    assert!(matches!(err, dx_llvm_ir::EmitError::UnsupportedTerminator("match")));
+}
+
+// ── toolchain: fake tool coverage ────────────────────────────────
+
+#[cfg(unix)]
+#[test]
+fn toolchain_verify_fails_when_llvm_as_exits_nonzero() {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("dx-tc-fail-{nonce}"));
+    fs::create_dir_all(&dir).unwrap();
+
+    let llvm_as = dir.join("llvm-as");
+    fs::write(&llvm_as, "#!/bin/sh\necho 'error: bad IR' >&2\nexit 1\n").unwrap();
+    let mut perms = fs::metadata(&llvm_as).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&llvm_as, perms).unwrap();
+
+    let ll = dir.join("test.ll");
+    fs::write(&ll, "bad content\n").unwrap();
+
+    let tc = dx_llvm_ir::toolchain::LlvmToolchain {
+        llvm_as: llvm_as.clone(),
+        opt: None,
+        llc: None,
+    };
+    let err = tc.verify_ll_file(&ll).expect_err("should fail");
+    match err {
+        dx_llvm_ir::toolchain::ToolchainError::CommandFailed { tool, stderr, .. } => {
+            assert_eq!(tool, "llvm-as");
+            assert!(stderr.contains("bad IR"), "stderr: {stderr}");
+        }
+        other => panic!("expected CommandFailed, got: {other}"),
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn toolchain_deterministic_output() {
+    let ir1 = dx_llvm_ir::pipeline::emit_source_to_string(
+        "fun f(x: Int) -> Int:\n    x + 1\n.\n",
+    ).expect("emit");
+    let ir2 = dx_llvm_ir::pipeline::emit_source_to_string(
+        "fun f(x: Int) -> Int:\n    x + 1\n.\n",
+    ).expect("emit");
+    assert_eq!(ir1, ir2, "pipeline output must be deterministic");
 }

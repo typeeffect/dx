@@ -497,11 +497,39 @@ mod tests {
     }
 
     #[test]
-    fn rejects_match_for_now() {
+    fn match_now_emits_through_lowered_cond_chain() {
+        // Match is now lowered to dx_rt_match_tag + CondBr before reaching emitter
         let module = llvm_module(
             "fun f(x: Result) -> Int:\n    match x:\n        Ok(v):\n            v\n        _:\n            0\n    .\n.\n",
         );
-        let err = emit_module(&module).expect_err("match should be unsupported");
+        let ir = emit_module(&module).expect("match should now emit successfully");
+        assert!(ir.contains("@dx_rt_match_tag"), "match_tag call:\n{ir}");
+        assert!(ir.contains("br "), "branch:\n{ir}");
+    }
+
+    #[test]
+    fn raw_match_br_still_rejected_by_emitter() {
+        // Manually constructed MatchBr should still be rejected
+        use dx_llvm::llvm::*;
+        let module = Module {
+            globals: vec![],
+            externs: vec![],
+            functions: vec![Function {
+                name: "f".into(),
+                params: vec![],
+                ret: Type::I64,
+                blocks: vec![Block {
+                    label: "bb0".into(),
+                    instructions: vec![],
+                    terminator: Terminator::MatchBr {
+                        scrutinee: Operand::ConstInt(0),
+                        arms: vec![],
+                        fallback: "bb0".into(),
+                    },
+                }],
+            }],
+        };
+        let err = emit_module(&module).expect_err("raw MatchBr should be rejected");
         assert!(matches!(err, EmitError::UnsupportedTerminator("match")));
     }
 }

@@ -8,7 +8,7 @@ use crate::throw::ThrowRuntimeHook;
 use dx_hir::Type;
 use dx_mir::mir;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RuntimeHookKind {
     Py(RuntimeHook),
     Closure(ClosureRuntimeHook),
@@ -16,7 +16,7 @@ pub enum RuntimeHookKind {
 }
 
 impl RuntimeHookKind {
-    pub fn symbol(self) -> &'static str {
+    pub fn symbol(&self) -> &'static str {
         match self {
             RuntimeHookKind::Py(hook) => hook.symbol(),
             RuntimeHookKind::Closure(hook) => hook.symbol(),
@@ -171,7 +171,9 @@ fn closure_hook_for_invocation(invocation: &LoweredClosureInvocation) -> Closure
         dx_hir::typed::CallTarget::LocalClosure { .. } if invocation.arg_count == 0 => {
             ClosureRuntimeHook::ThunkCall(ret)
         }
-        dx_hir::typed::CallTarget::LocalClosure { .. } => ClosureRuntimeHook::Call(ret),
+        dx_hir::typed::CallTarget::LocalClosure { .. } => {
+            ClosureRuntimeHook::Call(ret, invocation.arg_abis.clone().into_boxed_slice())
+        }
         _ => unreachable!("non-closure invocation passed to lower_invocation"),
     }
 }

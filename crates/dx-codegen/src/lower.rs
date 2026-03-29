@@ -152,7 +152,7 @@ fn lower_runtime_op(op: &RuntimeOp, locals: &[mir::Local]) -> LowStep {
         statement: op.statement,
         destination: op.destination,
         symbol: op.runtime_symbol,
-        ret: Some(low_ret_from_runtime_hook(op.hook)),
+        ret: Some(low_ret_from_runtime_hook(&op.hook)),
         kind: match &op.kind {
             RuntimeOpKind::PyCall {
                 arg_count,
@@ -210,7 +210,7 @@ fn lower_runtime_op(op: &RuntimeOp, locals: &[mir::Local]) -> LowStep {
     }
 }
 
-fn low_ret_from_runtime_hook(hook: RuntimeHookKind) -> LowType {
+fn low_ret_from_runtime_hook(hook: &RuntimeHookKind) -> LowType {
     match hook {
         RuntimeHookKind::Py(_) => LowType::Ptr,
         RuntimeHookKind::Closure(hook) => low_type_from_closure_abi(hook.signature().ret),

@@ -875,7 +875,7 @@ mod tests {
 
         // Every hook in ops plan should have a corresponding extern
         let extern_hooks: std::collections::BTreeSet<_> =
-            plan.externs.iter().map(|e| e.hook).collect();
+            plan.externs.iter().map(|e| e.hook.clone()).collect();
         for hook in &ops.required_hooks {
             assert!(
                 extern_hooks.contains(hook),

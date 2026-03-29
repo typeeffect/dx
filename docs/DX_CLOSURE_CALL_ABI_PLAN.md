@@ -148,33 +148,22 @@ This milestone does not require:
 - varargs
 - foreign closure ABI
 
-## Recommended First Shape
+## Current Preferred Shape
 
-For the current bootstrap backend, use the simplest explicit shape:
+The preferred current implementation is now the per-arity ABI described in:
 
-```text
-dx_rt_closure_call_i64(ClosureHandle, Arg0, Arg1, ...)
-dx_rt_closure_call_ptr(ClosureHandle, Arg0, Arg1, ...)
-...
-```
+- `docs/DX_CLOSURE_CALL_ARITY_PLAN.md`
 
-If backend representation cannot model variable parameter counts cleanly yet,
-the temporary fallback is:
-
-- specialize by both return ABI and arity in the runtime symbol layer
-
-for example:
+So ordinary closure calls should use symbols such as:
 
 ```text
-dx_rt_closure_call_i64_1
-dx_rt_closure_call_i64_2
+dx_rt_closure_call_i64_1_i64
+dx_rt_closure_call_i64_2_i64_i64
+dx_rt_closure_call_ptr_1_ptr
 ```
 
-But this fallback should only be used if it materially simplifies the current
-implementation. The preferred semantic model is still:
-
-- first arg = closure handle
-- following args = actual call args
+This keeps the backend explicit and validator-friendly while still preserving
+the chosen real-operand call shape.
 
 ## Tests Required
 

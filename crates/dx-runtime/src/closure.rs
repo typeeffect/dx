@@ -1,7 +1,7 @@
 use dx_hir::{typed, Type};
 use dx_mir::mir;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ClosureAbiType {
     ClosureHandle,
     EnvHandle,
@@ -13,10 +13,10 @@ pub enum ClosureAbiType {
     Void,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ClosureRuntimeHook {
     Create,
-    Call(ClosureReturnAbi),
+    Call(ClosureReturnAbi, Box<[ClosureAbiType]>),
     ThunkCall(ClosureReturnAbi),
 }
 
@@ -29,10 +29,10 @@ pub enum ClosureReturnAbi {
     Void,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClosureRuntimeHookSignature {
     pub symbol: &'static str,
-    pub params: &'static [ClosureAbiType],
+    pub params: Vec<ClosureAbiType>,
     pub ret: ClosureAbiType,
 }
 
@@ -59,6 +59,7 @@ pub struct LoweredClosureInvocation {
     pub target: typed::CallTarget,
     pub runtime_symbol: &'static str,
     pub arg_count: u32,
+    pub arg_abis: Vec<ClosureAbiType>,
     pub runtime_args: Vec<mir::CallArg>,
     pub result_type: Type,
     pub effects: Vec<String>,
@@ -72,30 +73,29 @@ pub struct ClosureRuntimePlan {
 }
 
 const CREATE_PARAMS: &[ClosureAbiType] = &[ClosureAbiType::EnvHandle, ClosureAbiType::U32];
-const CALL_PARAMS: &[ClosureAbiType] = &[ClosureAbiType::ClosureHandle, ClosureAbiType::U32];
 const THUNK_CALL_PARAMS: &[ClosureAbiType] = &[ClosureAbiType::ClosureHandle];
 
 impl ClosureRuntimeHook {
-    pub fn symbol(self) -> &'static str {
+    pub fn symbol(&self) -> &'static str {
         self.signature().symbol
     }
 
-    pub fn signature(self) -> ClosureRuntimeHookSignature {
+    pub fn signature(&self) -> ClosureRuntimeHookSignature {
         match self {
             ClosureRuntimeHook::Create => ClosureRuntimeHookSignature {
                 symbol: "dx_rt_closure_create",
-                params: CREATE_PARAMS,
+                params: CREATE_PARAMS.to_vec(),
                 ret: ClosureAbiType::ClosureHandle,
             },
-            ClosureRuntimeHook::Call(ret) => ClosureRuntimeHookSignature {
-                symbol: call_symbol(ret),
-                params: CALL_PARAMS,
-                ret: closure_return_abi_type(ret),
+            ClosureRuntimeHook::Call(ret, arg_abis) => ClosureRuntimeHookSignature {
+                symbol: call_symbol(*ret, arg_abis),
+                params: closure_call_params(arg_abis),
+                ret: closure_return_abi_type(*ret),
             },
             ClosureRuntimeHook::ThunkCall(ret) => ClosureRuntimeHookSignature {
-                symbol: thunk_call_symbol(ret),
-                params: THUNK_CALL_PARAMS,
-                ret: closure_return_abi_type(ret),
+                symbol: thunk_call_symbol(*ret),
+                params: THUNK_CALL_PARAMS.to_vec(),
+                ret: closure_return_abi_type(*ret),
             },
         }
     }
@@ -144,10 +144,14 @@ pub fn build_closure_runtime_plan(module: &mir::Module) -> ClosureRuntimePlan {
                         let Some(closure_local) = local_closure_operand(callee) else {
                             continue;
                         };
-                        let Some(hook) = hook_for_closure_call(target, args.len(), ty) else {
+                        let Some((hook, arg_abis)) =
+                            hook_for_closure_call(target, args, &function.locals, ty)
+                        else {
                             continue;
                         };
-                        add_hook(&mut required_hooks, hook);
+                        add_hook(&mut required_hooks, hook.clone());
+                        let arity = args.len();
+                        let symbol = hook.symbol();
                         invocations.push(LoweredClosureInvocation {
                             function: function.name.clone(),
                             block: block_id,
@@ -155,8 +159,9 @@ pub fn build_closure_runtime_plan(module: &mir::Module) -> ClosureRuntimePlan {
                             destination: *place,
                             closure_local,
                             target: target.clone(),
-                            runtime_symbol: hook.symbol(),
-                            arg_count: args.len() as u32,
+                            runtime_symbol: symbol,
+                            arg_count: arity as u32,
+                            arg_abis,
                             runtime_args: args.clone(),
                             result_type: ty.clone(),
                             effects: effects.clone(),
@@ -177,19 +182,54 @@ pub fn build_closure_runtime_plan(module: &mir::Module) -> ClosureRuntimePlan {
 
 fn hook_for_closure_call(
     target: &typed::CallTarget,
-    arg_count: usize,
+    args: &[mir::CallArg],
+    locals: &[mir::Local],
     result_type: &Type,
-) -> Option<ClosureRuntimeHook> {
+) -> Option<(ClosureRuntimeHook, Vec<ClosureAbiType>)> {
     let ret_abi = closure_return_abi(result_type);
+    let arg_abis = closure_arg_abis(args, locals);
     match target {
         typed::CallTarget::LocalClosure { .. } => {
-            if arg_count == 0 {
-                Some(ClosureRuntimeHook::ThunkCall(ret_abi))
+            if arg_abis.is_empty() {
+                Some((ClosureRuntimeHook::ThunkCall(ret_abi), arg_abis))
             } else {
-                Some(ClosureRuntimeHook::Call(ret_abi))
+                Some((
+                    ClosureRuntimeHook::Call(ret_abi, arg_abis.clone().into_boxed_slice()),
+                    arg_abis,
+                ))
             }
         }
         _ => None,
+    }
+}
+
+fn closure_arg_abis(args: &[mir::CallArg], locals: &[mir::Local]) -> Vec<ClosureAbiType> {
+    args.iter()
+        .map(|arg| match arg {
+            mir::CallArg::Positional(value) => closure_operand_abi(value, locals),
+            mir::CallArg::Named { value, .. } => closure_operand_abi(value, locals),
+        })
+        .collect()
+}
+
+fn closure_operand_abi(operand: &mir::Operand, locals: &[mir::Local]) -> ClosureAbiType {
+    match operand {
+        mir::Operand::Copy(local) => closure_type_abi(&locals[*local].ty),
+        mir::Operand::Const(mir::Constant::Int(_)) => ClosureAbiType::I64,
+        mir::Operand::Const(mir::Constant::String(_)) => ClosureAbiType::Ptr,
+        mir::Operand::Const(mir::Constant::Unit) => ClosureAbiType::Ptr,
+    }
+}
+
+fn closure_type_abi(ty: &Type) -> ClosureAbiType {
+    match ty {
+        Type::Int => ClosureAbiType::I64,
+        Type::Float => ClosureAbiType::F64,
+        Type::Bool => ClosureAbiType::I1,
+        Type::Unit => ClosureAbiType::Ptr,
+        Type::Str | Type::PyObj | Type::Named(_) | Type::Function { .. } | Type::Unknown => {
+            ClosureAbiType::Ptr
+        }
     }
 }
 
@@ -215,14 +255,17 @@ fn closure_return_abi_type(abi: ClosureReturnAbi) -> ClosureAbiType {
     }
 }
 
-fn call_symbol(ret: ClosureReturnAbi) -> &'static str {
-    match ret {
-        ClosureReturnAbi::I64 => "dx_rt_closure_call_i64",
-        ClosureReturnAbi::F64 => "dx_rt_closure_call_f64",
-        ClosureReturnAbi::I1 => "dx_rt_closure_call_i1",
-        ClosureReturnAbi::Ptr => "dx_rt_closure_call_ptr",
-        ClosureReturnAbi::Void => "dx_rt_closure_call_void",
+pub fn call_symbol(ret: ClosureReturnAbi, arg_abis: &[ClosureAbiType]) -> &'static str {
+    let mut symbol = format!(
+        "dx_rt_closure_call_{}_{}",
+        closure_return_suffix(ret),
+        arg_abis.len()
+    );
+    for abi in arg_abis {
+        symbol.push('_');
+        symbol.push_str(closure_abi_suffix(*abi));
     }
+    Box::leak(symbol.into_boxed_str())
 }
 
 fn thunk_call_symbol(ret: ClosureReturnAbi) -> &'static str {
@@ -232,6 +275,36 @@ fn thunk_call_symbol(ret: ClosureReturnAbi) -> &'static str {
         ClosureReturnAbi::I1 => "dx_rt_thunk_call_i1",
         ClosureReturnAbi::Ptr => "dx_rt_thunk_call_ptr",
         ClosureReturnAbi::Void => "dx_rt_thunk_call_void",
+    }
+}
+
+fn closure_call_params(arg_abis: &[ClosureAbiType]) -> Vec<ClosureAbiType> {
+    let mut params = Vec::with_capacity(1 + arg_abis.len());
+    params.push(ClosureAbiType::ClosureHandle);
+    params.extend_from_slice(arg_abis);
+    params
+}
+
+fn closure_return_suffix(ret: ClosureReturnAbi) -> &'static str {
+    match ret {
+        ClosureReturnAbi::I64 => "i64",
+        ClosureReturnAbi::F64 => "f64",
+        ClosureReturnAbi::I1 => "i1",
+        ClosureReturnAbi::Ptr => "ptr",
+        ClosureReturnAbi::Void => "void",
+    }
+}
+
+fn closure_abi_suffix(abi: ClosureAbiType) -> &'static str {
+    match abi {
+        ClosureAbiType::ClosureHandle => "closure",
+        ClosureAbiType::EnvHandle => "env",
+        ClosureAbiType::U32 => "u32",
+        ClosureAbiType::I64 => "i64",
+        ClosureAbiType::F64 => "f64",
+        ClosureAbiType::I1 => "i1",
+        ClosureAbiType::Ptr => "ptr",
+        ClosureAbiType::Void => "void",
     }
 }
 
@@ -301,10 +374,14 @@ mod tests {
         assert!(plan.required_hooks.contains(&ClosureRuntimeHook::Create));
         assert!(plan
             .required_hooks
-            .contains(&ClosureRuntimeHook::Call(ClosureReturnAbi::I64)));
+            .contains(&ClosureRuntimeHook::Call(
+                ClosureReturnAbi::I64,
+                vec![ClosureAbiType::I64].into_boxed_slice(),
+            )));
         assert_eq!(plan.invocations.len(), 1);
-        assert_eq!(plan.invocations[0].runtime_symbol, "dx_rt_closure_call_i64");
+        assert_eq!(plan.invocations[0].runtime_symbol, "dx_rt_closure_call_i64_1_i64");
         assert_eq!(plan.invocations[0].arg_count, 1);
+        assert_eq!(plan.invocations[0].arg_abis, vec![ClosureAbiType::I64]);
         assert!(matches!(
             &plan.invocations[0].runtime_args[..],
             [mir::CallArg::Positional(mir::Operand::Const(mir::Constant::Int(v)))] if v == "1"
@@ -317,15 +394,19 @@ mod tests {
             ClosureRuntimeHook::Create.signature(),
             ClosureRuntimeHookSignature {
                 symbol: "dx_rt_closure_create",
-                params: CREATE_PARAMS,
+                params: CREATE_PARAMS.to_vec(),
                 ret: ClosureAbiType::ClosureHandle,
             }
         );
         assert_eq!(
-            ClosureRuntimeHook::Call(ClosureReturnAbi::Ptr).signature(),
+            ClosureRuntimeHook::Call(
+                ClosureReturnAbi::Ptr,
+                vec![ClosureAbiType::I64].into_boxed_slice(),
+            )
+            .signature(),
             ClosureRuntimeHookSignature {
-                symbol: "dx_rt_closure_call_ptr",
-                params: CALL_PARAMS,
+                symbol: "dx_rt_closure_call_ptr_1_i64",
+                params: vec![ClosureAbiType::ClosureHandle, ClosureAbiType::I64],
                 ret: ClosureAbiType::Ptr,
             }
         );
@@ -333,7 +414,7 @@ mod tests {
             ClosureRuntimeHook::ThunkCall(ClosureReturnAbi::Ptr).signature(),
             ClosureRuntimeHookSignature {
                 symbol: "dx_rt_thunk_call_ptr",
-                params: THUNK_CALL_PARAMS,
+                params: THUNK_CALL_PARAMS.to_vec(),
                 ret: ClosureAbiType::Ptr,
             }
         );
