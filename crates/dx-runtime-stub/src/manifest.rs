@@ -1,5 +1,11 @@
 pub const EXPORTED_SYMBOLS: &[&str] = &[
     "dx_rt_closure_create",
+    "dx_rt_closure_call_i64_1_i64",
+    "dx_rt_closure_call_i64_2_i64_i64",
+    "dx_rt_closure_call_ptr_1_ptr",
+    "dx_rt_closure_call_ptr_1_i64",
+    "dx_rt_closure_call_ptr_2_ptr_i64",
+    "dx_rt_closure_call_void_3_i64_ptr_i1",
     "dx_rt_thunk_call_i64",
     "dx_rt_thunk_call_f64",
     "dx_rt_thunk_call_i1",
@@ -24,6 +30,7 @@ mod tests {
     fn exported_symbols_include_core_stub_surface() {
         for symbol in &[
             "dx_rt_closure_create",
+            "dx_rt_closure_call_i64_1_i64",
             "dx_rt_thunk_call_i64",
             "dx_rt_match_tag",
             "dx_rt_throw_check_pending",
@@ -34,8 +41,8 @@ mod tests {
     }
 
     #[test]
-    fn exported_symbols_do_not_claim_ordinary_closure_call_yet() {
-        assert!(!EXPORTED_SYMBOLS
+    fn exported_symbols_claim_ordinary_closure_call_surface() {
+        assert!(EXPORTED_SYMBOLS
             .iter()
             .any(|sym| sym.starts_with("dx_rt_closure_call_")));
     }

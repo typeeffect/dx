@@ -29,6 +29,32 @@ pub extern "C" fn dx_rt_closure_create(env: EnvHandle, arity: u32) -> ClosureHan
     Box::into_raw(closure) as ClosureHandle
 }
 
+macro_rules! closure_call_stub {
+    ($name:ident($($arg:ident : $ty:ty),*) -> $ret:ty => $default:expr) => {
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $name(_closure: ClosureHandle, $($arg: $ty),*) -> $ret {
+            let _ = ($($arg),*);
+            $default
+        }
+    };
+}
+
+macro_rules! closure_call_stub_void {
+    ($name:ident($($arg:ident : $ty:ty),*)) => {
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $name(_closure: ClosureHandle, $($arg: $ty),*) {
+            let _ = ($($arg),*);
+        }
+    };
+}
+
+closure_call_stub!(dx_rt_closure_call_i64_1_i64(arg0: i64) -> i64 => 0);
+closure_call_stub!(dx_rt_closure_call_i64_2_i64_i64(arg0: i64, arg1: i64) -> i64 => 0);
+closure_call_stub!(dx_rt_closure_call_ptr_1_ptr(arg0: *mut c_void) -> *mut c_void => ptr::null_mut());
+closure_call_stub!(dx_rt_closure_call_ptr_1_i64(arg0: i64) -> *mut c_void => ptr::null_mut());
+closure_call_stub!(dx_rt_closure_call_ptr_2_ptr_i64(arg0: *mut c_void, arg1: i64) -> *mut c_void => ptr::null_mut());
+closure_call_stub_void!(dx_rt_closure_call_void_3_i64_ptr_i1(arg0: i64, arg1: *mut c_void, arg2: bool));
+
 #[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_thunk_call_i64(_closure: ClosureHandle) -> i64 {
     0
@@ -130,6 +156,18 @@ mod tests {
         assert!(!dx_rt_thunk_call_i1(handle));
         assert!(dx_rt_thunk_call_ptr(handle).is_null());
         dx_rt_thunk_call_void(handle);
+        free_closure(handle);
+    }
+
+    #[test]
+    fn closure_call_stubs_return_default_values() {
+        let handle = dx_rt_closure_create(ptr::null_mut(), 1);
+        assert_eq!(dx_rt_closure_call_i64_1_i64(handle, 7), 0);
+        assert_eq!(dx_rt_closure_call_i64_2_i64_i64(handle, 7, 9), 0);
+        assert!(dx_rt_closure_call_ptr_1_ptr(handle, ptr::null_mut()).is_null());
+        assert!(dx_rt_closure_call_ptr_1_i64(handle, 7).is_null());
+        assert!(dx_rt_closure_call_ptr_2_ptr_i64(handle, ptr::null_mut(), 9).is_null());
+        dx_rt_closure_call_void_3_i64_ptr_i1(handle, 1, ptr::null_mut(), false);
         free_closure(handle);
     }
 
