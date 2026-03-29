@@ -39,6 +39,12 @@ struct Capture2I1 {
 }
 
 #[repr(C)]
+struct Capture2Ptr {
+    a: *mut c_void,
+    b: *mut c_void,
+}
+
+#[repr(C)]
 struct StubTaggedValue {
     tag: Utf8Ptr,
 }
@@ -199,15 +205,25 @@ pub extern "C" fn dx_rt_closure_call_ptr_1_ptr(
         return ptr::null_mut();
     };
     let closure = unsafe { &*closure_ptr };
-    if closure.env.is_null() {
-        let fun: extern "C" fn(*mut c_void) -> *mut c_void =
-            unsafe { std::mem::transmute(code_ptr) };
-        fun(arg0)
-    } else {
-        let capture0 = unsafe { *(closure.env as *const *mut c_void) };
-        let fun: extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
-            unsafe { std::mem::transmute(code_ptr) };
-        fun(capture0, arg0)
+    match (closure.env.is_null(), closure.capture_count) {
+        (true, _) => {
+            let fun: extern "C" fn(*mut c_void) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(arg0)
+        }
+        (false, 1) => {
+            let capture0 = unsafe { *(closure.env as *const *mut c_void) };
+            let fun: extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(capture0, arg0)
+        }
+        (false, 2) => {
+            let env = unsafe { &*(closure.env as *const Capture2Ptr) };
+            let fun: extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, arg0)
+        }
+        _ => ptr::null_mut(),
     }
 }
 
@@ -220,14 +236,24 @@ pub extern "C" fn dx_rt_closure_call_ptr_1_i64(
         return ptr::null_mut();
     };
     let closure = unsafe { &*closure_ptr };
-    if closure.env.is_null() {
-        let fun: extern "C" fn(i64) -> *mut c_void = unsafe { std::mem::transmute(code_ptr) };
-        fun(arg0)
-    } else {
-        let capture0 = unsafe { *(closure.env as *const *mut c_void) };
-        let fun: extern "C" fn(*mut c_void, i64) -> *mut c_void =
-            unsafe { std::mem::transmute(code_ptr) };
-        fun(capture0, arg0)
+    match (closure.env.is_null(), closure.capture_count) {
+        (true, _) => {
+            let fun: extern "C" fn(i64) -> *mut c_void = unsafe { std::mem::transmute(code_ptr) };
+            fun(arg0)
+        }
+        (false, 1) => {
+            let capture0 = unsafe { *(closure.env as *const *mut c_void) };
+            let fun: extern "C" fn(*mut c_void, i64) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(capture0, arg0)
+        }
+        (false, 2) => {
+            let env = unsafe { &*(closure.env as *const Capture2Ptr) };
+            let fun: extern "C" fn(*mut c_void, *mut c_void, i64) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, arg0)
+        }
+        _ => ptr::null_mut(),
     }
 }
 
@@ -241,15 +267,25 @@ pub extern "C" fn dx_rt_closure_call_ptr_2_ptr_i64(
         return ptr::null_mut();
     };
     let closure = unsafe { &*closure_ptr };
-    if closure.env.is_null() {
-        let fun: extern "C" fn(*mut c_void, i64) -> *mut c_void =
-            unsafe { std::mem::transmute(code_ptr) };
-        fun(arg0, arg1)
-    } else {
-        let capture0 = unsafe { *(closure.env as *const *mut c_void) };
-        let fun: extern "C" fn(*mut c_void, *mut c_void, i64) -> *mut c_void =
-            unsafe { std::mem::transmute(code_ptr) };
-        fun(capture0, arg0, arg1)
+    match (closure.env.is_null(), closure.capture_count) {
+        (true, _) => {
+            let fun: extern "C" fn(*mut c_void, i64) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(arg0, arg1)
+        }
+        (false, 1) => {
+            let capture0 = unsafe { *(closure.env as *const *mut c_void) };
+            let fun: extern "C" fn(*mut c_void, *mut c_void, i64) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(capture0, arg0, arg1)
+        }
+        (false, 2) => {
+            let env = unsafe { &*(closure.env as *const Capture2Ptr) };
+            let fun: extern "C" fn(*mut c_void, *mut c_void, *mut c_void, i64) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, arg0, arg1)
+        }
+        _ => ptr::null_mut(),
     }
 }
 
@@ -602,6 +638,31 @@ mod tests {
         capture
     }
 
+    extern "C" fn second_ptr_with_arg(
+        _c0: *mut c_void,
+        c1: *mut c_void,
+        _arg: i64,
+    ) -> *mut c_void {
+        c1
+    }
+
+    extern "C" fn first_ptr_with_ptr_arg(
+        c0: *mut c_void,
+        _c1: *mut c_void,
+        _arg: *mut c_void,
+    ) -> *mut c_void {
+        c0
+    }
+
+    extern "C" fn second_ptr_with_mixed_args(
+        _c0: *mut c_void,
+        c1: *mut c_void,
+        _arg0: *mut c_void,
+        _arg1: i64,
+    ) -> *mut c_void {
+        c1
+    }
+
     extern "C" fn ptr_identity_thunk(capture: *mut c_void) -> *mut c_void {
         capture
     }
@@ -663,6 +724,32 @@ mod tests {
 
         free_closure(closure);
         free_env::<*mut c_void>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_ptr_return_can_dispatch_with_two_ptr_captures() {
+        let payload0 = 0x1234usize as *mut c_void;
+        let payload1 = 0x5678usize as *mut c_void;
+        let env = Box::into_raw(Box::new(Capture2Ptr {
+            a: payload0,
+            b: payload1,
+        })) as EnvHandle;
+
+        let c1 = dx_rt_closure_create(second_ptr_with_arg as *mut c_void, env, 1, 2);
+        let c2 = dx_rt_closure_create(first_ptr_with_ptr_arg as *mut c_void, env, 1, 2);
+        let c3 = dx_rt_closure_create(second_ptr_with_mixed_args as *mut c_void, env, 2, 2);
+
+        assert_eq!(dx_rt_closure_call_ptr_1_i64(c1, 7), payload1);
+        assert_eq!(dx_rt_closure_call_ptr_1_ptr(c2, 0x9999usize as *mut c_void), payload0);
+        assert_eq!(
+            dx_rt_closure_call_ptr_2_ptr_i64(c3, 0xaaaausize as *mut c_void, 9),
+            payload1
+        );
+
+        free_closure(c1);
+        free_closure(c2);
+        free_closure(c3);
+        free_env::<Capture2Ptr>(env);
     }
 
     #[test]
