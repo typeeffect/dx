@@ -59,6 +59,10 @@ and audit tooling is documented in:
 
 - `docs/DX_TOOLCHAIN_PROVEN_SUBSET.md`
 
+The current minimal native executable entrypoint contract is documented in:
+
+- `docs/DX_EXECUTABLE_ENTRYPOINT_PLAN.md`
+
 ## Compiler Pipeline
 
 The intended pipeline is now:
@@ -78,6 +82,10 @@ The intended pipeline is now:
 Future extension planned after the executable backend baseline:
 
 12. explicit schema artifact acquisition for typed external data shapes
+
+Immediate executable-path constraint:
+
+- the first stable native executable contract is currently `fun main() -> Int`
 
 ## Representation Roles
 
