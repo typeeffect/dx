@@ -84,6 +84,38 @@ pub extern "C" fn dx_rt_closure_call_i64_1_i64(closure: ClosureHandle, arg0: i64
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dx_rt_closure_call_f64_1_f64(closure: ClosureHandle, arg0: f64) -> f64 {
+    let Some((closure_ptr, code_ptr)) = closure_code_ptr(closure) else {
+        return 0.0;
+    };
+    let closure = unsafe { &*closure_ptr };
+    if closure.env.is_null() {
+        let fun: extern "C" fn(f64) -> f64 = unsafe { std::mem::transmute(code_ptr) };
+        fun(arg0)
+    } else {
+        let capture0 = unsafe { *(closure.env as *const f64) };
+        let fun: extern "C" fn(f64, f64) -> f64 = unsafe { std::mem::transmute(code_ptr) };
+        fun(capture0, arg0)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dx_rt_closure_call_i1_1_i1(closure: ClosureHandle, arg0: bool) -> bool {
+    let Some((closure_ptr, code_ptr)) = closure_code_ptr(closure) else {
+        return false;
+    };
+    let closure = unsafe { &*closure_ptr };
+    if closure.env.is_null() {
+        let fun: extern "C" fn(bool) -> bool = unsafe { std::mem::transmute(code_ptr) };
+        fun(arg0)
+    } else {
+        let capture0 = unsafe { *(closure.env as *const bool) };
+        let fun: extern "C" fn(bool, bool) -> bool = unsafe { std::mem::transmute(code_ptr) };
+        fun(capture0, arg0)
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_closure_call_i64_2_i64_i64(
     closure: ClosureHandle,
     arg0: i64,
@@ -364,6 +396,22 @@ mod tests {
         capture + x + y
     }
 
+    extern "C" fn echo_f64(x: f64) -> f64 {
+        x
+    }
+
+    extern "C" fn add_f64_capture(capture: f64, x: f64) -> f64 {
+        capture + x
+    }
+
+    extern "C" fn echo_i1(x: bool) -> bool {
+        x
+    }
+
+    extern "C" fn xor_i1_capture(capture: bool, x: bool) -> bool {
+        capture ^ x
+    }
+
     extern "C" fn echo_ptr(x: *mut c_void) -> *mut c_void {
         x
     }
@@ -382,17 +430,23 @@ mod tests {
         let c2 = dx_rt_closure_create(add_pair as *mut c_void, ptr::null_mut(), 2);
         let c3 = dx_rt_closure_create(echo_ptr as *mut c_void, ptr::null_mut(), 1);
         let c4 = dx_rt_closure_create(int_to_ptr as *mut c_void, ptr::null_mut(), 1);
+        let c5 = dx_rt_closure_create(echo_f64 as *mut c_void, ptr::null_mut(), 1);
+        let c6 = dx_rt_closure_create(echo_i1 as *mut c_void, ptr::null_mut(), 1);
         let payload = 0x55usize as *mut c_void;
 
         assert_eq!(dx_rt_closure_call_i64_1_i64(c1, 41), 42);
         assert_eq!(dx_rt_closure_call_i64_2_i64_i64(c2, 20, 22), 42);
         assert_eq!(dx_rt_closure_call_ptr_1_ptr(c3, payload), payload);
         assert_eq!(dx_rt_closure_call_ptr_1_i64(c4, 42), 42usize as *mut c_void);
+        assert_eq!(dx_rt_closure_call_f64_1_f64(c5, 3.5), 3.5);
+        assert!(dx_rt_closure_call_i1_1_i1(c6, true));
 
         free_closure(c1);
         free_closure(c2);
         free_closure(c3);
         free_closure(c4);
+        free_closure(c5);
+        free_closure(c6);
     }
 
     #[test]
@@ -427,6 +481,22 @@ mod tests {
 
         free_closure(closure);
         free_env::<*mut c_void>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_f64_and_i1_calls_can_dispatch_with_single_capture() {
+        let env_f64 = Box::into_raw(Box::new(38.5_f64)) as EnvHandle;
+        let env_i1 = Box::into_raw(Box::new(true)) as EnvHandle;
+        let closure_f64 = dx_rt_closure_create(add_f64_capture as *mut c_void, env_f64, 1);
+        let closure_i1 = dx_rt_closure_create(xor_i1_capture as *mut c_void, env_i1, 1);
+
+        assert_eq!(dx_rt_closure_call_f64_1_f64(closure_f64, 3.5), 42.0);
+        assert!(!dx_rt_closure_call_i1_1_i1(closure_i1, true));
+
+        free_closure(closure_f64);
+        free_closure(closure_i1);
+        free_env::<f64>(env_f64);
+        free_env::<bool>(env_i1);
     }
 
     #[test]
