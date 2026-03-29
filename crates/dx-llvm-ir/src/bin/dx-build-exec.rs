@@ -23,11 +23,12 @@ struct CliOptions {
     runtime_archive: Option<PathBuf>,
     verify: bool,
     dry_run: bool,
+    json: bool,
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let Some(options) = parse_args(std::env::args_os().skip(1))? else {
-        println!("usage: dx-build-exec [--verify] [--dry-run] [--runtime-archive <path>] <input.dx> [build-dir]");
+        println!("usage: dx-build-exec [--verify] [--dry-run] [--json] [--runtime-archive <path>] <input.dx> [build-dir]");
         return Ok(());
     };
 
@@ -42,11 +43,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         if options.dry_run {
-            println!("{}", render_verified_executable_plan(&plan));
+            if options.json {
+                println!("{}", render_verified_plan_json(&plan));
+            } else {
+                println!("{}", render_verified_executable_plan(&plan));
+            }
         } else {
             let tools = discover_executable_tools()?;
             materialize_verified_executable_plan(&plan, &tools)?;
-            println!("{}", plan.source.executable.executable_path.display());
+            if options.json {
+                println!("{}", render_verified_result_json(&plan));
+            } else {
+                println!("{}", plan.source.executable.executable_path.display());
+            }
         }
     } else {
         let mut plan = build_source_executable_plan(&options.input, &options.build_dir);
@@ -59,11 +68,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         if options.dry_run {
-            println!("{}", render_source_executable_plan(&plan));
+            if options.json {
+                println!("{}", render_source_plan_json(&plan));
+            } else {
+                println!("{}", render_source_executable_plan(&plan));
+            }
         } else {
             let tools = discover_executable_tools()?;
             materialize_source_executable_plan(&plan, &tools)?;
-            println!("{}", plan.executable.executable_path.display());
+            if options.json {
+                println!("{}", render_source_result_json(&plan));
+            } else {
+                println!("{}", plan.executable.executable_path.display());
+            }
         }
     }
 
@@ -78,6 +95,7 @@ where
     let mut positional = Vec::new();
     let mut verify = false;
     let mut dry_run = false;
+    let mut json = false;
     let mut runtime_archive = None;
     let mut args = args.into_iter().map(Into::into).peekable();
     while let Some(arg) = args.next() {
@@ -90,6 +108,10 @@ where
         }
         if arg == "--dry-run" {
             dry_run = true;
+            continue;
+        }
+        if arg == "--json" {
+            json = true;
             continue;
         }
         if arg == "--runtime-archive" {
@@ -106,14 +128,14 @@ where
     let input = positional
         .first()
         .cloned()
-        .ok_or_else(|| "usage: dx-build-exec [--verify] [--dry-run] [--runtime-archive <path>] <input.dx> [build-dir]".to_string())?;
+        .ok_or_else(|| "usage: dx-build-exec [--verify] [--dry-run] [--json] [--runtime-archive <path>] <input.dx> [build-dir]".to_string())?;
     let build_dir = positional
         .get(1)
         .cloned()
         .unwrap_or_else(|| PathBuf::from("build"));
 
     if positional.len() > 2 {
-        return Err("usage: dx-build-exec [--verify] [--dry-run] [--runtime-archive <path>] <input.dx> [build-dir]".into());
+        return Err("usage: dx-build-exec [--verify] [--dry-run] [--json] [--runtime-archive <path>] <input.dx> [build-dir]".into());
     }
 
     Ok(Some(CliOptions {
@@ -122,7 +144,78 @@ where
         runtime_archive,
         verify,
         dry_run,
+        json,
     }))
+}
+
+fn render_source_plan_json(plan: &dx_llvm_ir::SourceExecutablePlan) -> String {
+    format!(
+        concat!(
+            "{{",
+            "\"mode\":\"source-plan\",",
+            "\"input\":\"{}\",",
+            "\"ll\":\"{}\",",
+            "\"runtime_archive\":\"{}\",",
+            "\"executable\":\"{}\",",
+            "\"emit_command\":\"{}\",",
+            "\"assemble_command\":\"{}\",",
+            "\"compile_command\":\"{}\",",
+            "\"link_command\":\"{}\"",
+            "}}"
+        ),
+        json_escape(&plan.input_dx.display().to_string()),
+        json_escape(&plan.executable.ll_path.display().to_string()),
+        json_escape(&plan.executable.runtime_archive.display().to_string()),
+        json_escape(&plan.executable.executable_path.display().to_string()),
+        json_escape(&plan.emit_command.join(" ")),
+        json_escape(&plan.executable.link_plan.assemble.join(" ")),
+        json_escape(&plan.executable.link_plan.compile.join(" ")),
+        json_escape(&plan.executable.link_plan.link.join(" ")),
+    )
+}
+
+fn render_verified_plan_json(plan: &dx_llvm_ir::VerifiedExecutablePlan) -> String {
+    format!(
+        concat!(
+            "{{",
+            "\"mode\":\"verified-plan\",",
+            "\"input\":\"{}\",",
+            "\"ll\":\"{}\",",
+            "\"runtime_archive\":\"{}\",",
+            "\"executable\":\"{}\",",
+            "\"emit_command\":\"{}\",",
+            "\"assemble_command\":\"{}\",",
+            "\"compile_command\":\"{}\",",
+            "\"link_command\":\"{}\"",
+            "}}"
+        ),
+        json_escape(&plan.source.input_dx.display().to_string()),
+        json_escape(&plan.source.executable.ll_path.display().to_string()),
+        json_escape(&plan.source.executable.runtime_archive.display().to_string()),
+        json_escape(&plan.source.executable.executable_path.display().to_string()),
+        json_escape(&plan.verify_emit_command.join(" ")),
+        json_escape(&plan.source.executable.link_plan.assemble.join(" ")),
+        json_escape(&plan.source.executable.link_plan.compile.join(" ")),
+        json_escape(&plan.source.executable.link_plan.link.join(" ")),
+    )
+}
+
+fn render_source_result_json(plan: &dx_llvm_ir::SourceExecutablePlan) -> String {
+    format!(
+        "{{\"mode\":\"source-build\",\"executable\":\"{}\"}}",
+        json_escape(&plan.executable.executable_path.display().to_string())
+    )
+}
+
+fn render_verified_result_json(plan: &dx_llvm_ir::VerifiedExecutablePlan) -> String {
+    format!(
+        "{{\"mode\":\"verified-build\",\"executable\":\"{}\"}}",
+        json_escape(&plan.source.executable.executable_path.display().to_string())
+    )
+}
+
+fn json_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(test)]
@@ -140,6 +233,7 @@ mod tests {
                 runtime_archive: None,
                 verify: false,
                 dry_run: false,
+                json: false,
             }
         );
     }
@@ -155,6 +249,7 @@ mod tests {
                 runtime_archive: None,
                 verify: false,
                 dry_run: false,
+                json: false,
             }
         );
     }
@@ -172,6 +267,7 @@ mod tests {
                 runtime_archive: None,
                 verify: true,
                 dry_run: false,
+                json: false,
             }
         );
     }
@@ -189,6 +285,7 @@ mod tests {
                 runtime_archive: None,
                 verify: false,
                 dry_run: true,
+                json: false,
             }
         );
     }
@@ -210,6 +307,7 @@ mod tests {
                 runtime_archive: Some(PathBuf::from("/tmp/libdx_runtime_stub.a")),
                 verify: false,
                 dry_run: false,
+                json: false,
             }
         );
     }
@@ -218,6 +316,24 @@ mod tests {
     fn parse_args_rejects_missing_runtime_archive_path() {
         let err = parse_args(["--runtime-archive"]).expect_err("missing path should fail");
         assert!(err.to_string().contains("--runtime-archive requires a path"));
+    }
+
+    #[test]
+    fn parse_args_supports_json_flag() {
+        let opts = parse_args(["--json", "examples/demo.dx"])
+            .expect("parse")
+            .expect("options");
+        assert_eq!(
+            opts,
+            CliOptions {
+                input: PathBuf::from("examples/demo.dx"),
+                build_dir: PathBuf::from("build"),
+                runtime_archive: None,
+                verify: false,
+                dry_run: false,
+                json: true,
+            }
+        );
     }
 
     #[test]
