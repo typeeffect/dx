@@ -182,6 +182,71 @@ pub fn render_artifact_summary(artifact: &SchemaArtifact) -> String {
     )
 }
 
+pub fn render_artifact_canonical(artifact: &SchemaArtifact) -> String {
+    let mut out = String::new();
+    out.push_str("[schema]\n");
+    out.push_str(&format!(
+        "format_version = \"{}\"\n",
+        artifact.schema.format_version
+    ));
+    out.push_str(&format!("name = \"{}\"\n", artifact.schema.name));
+    out.push_str(&format!("provider = \"{}\"\n", artifact.schema.provider));
+    out.push_str(&format!("source = \"{}\"\n", artifact.schema.source));
+    out.push_str(&format!(
+        "source_fingerprint = \"{}\"\n",
+        artifact.schema.source_fingerprint
+    ));
+    out.push_str(&format!(
+        "schema_fingerprint = \"{}\"\n",
+        artifact.schema.schema_fingerprint
+    ));
+    out.push_str(&format!(
+        "generated_at = \"{}\"\n\n",
+        artifact.schema.generated_at
+    ));
+    out.push_str("[fields]\n");
+    for (name, field) in &artifact.fields {
+        out.push_str(&format!(
+            "{} = {{ type = \"{}\", nullable = {} }}\n",
+            name,
+            render_dx_type(field.ty),
+            if field.nullable { "true" } else { "false" }
+        ));
+    }
+    out
+}
+
+pub fn render_artifact_json(artifact: &SchemaArtifact) -> String {
+    let mut out = String::new();
+    out.push_str("{\"schema\":{");
+    out.push_str(&format!(
+        "\"format_version\":\"{}\",\"name\":\"{}\",\"provider\":\"{}\",\"source\":\"{}\",\"source_fingerprint\":\"{}\",\"schema_fingerprint\":\"{}\",\"generated_at\":\"{}\"",
+        escape_json(&artifact.schema.format_version),
+        escape_json(&artifact.schema.name),
+        escape_json(&artifact.schema.provider),
+        escape_json(&artifact.schema.source),
+        escape_json(&artifact.schema.source_fingerprint),
+        escape_json(&artifact.schema.schema_fingerprint),
+        escape_json(&artifact.schema.generated_at),
+    ));
+    out.push_str("},\"fields\":{");
+    let mut first = true;
+    for (name, field) in &artifact.fields {
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        out.push_str(&format!(
+            "\"{}\":{{\"type\":\"{}\",\"nullable\":{}}}",
+            escape_json(name),
+            render_dx_type(field.ty),
+            if field.nullable { "true" } else { "false" }
+        ));
+    }
+    out.push_str("}}");
+    out
+}
+
 fn strip_comment(line: &str) -> &str {
     match line.find('#') {
         Some(index) => &line[..index],
@@ -233,6 +298,19 @@ fn parse_dx_type(name: &str) -> Result<DxSchemaType, SchemaArtifactError> {
         "Bool" => Ok(DxSchemaType::Bool),
         _ => Err(SchemaArtifactError::UnsupportedType(name.to_string())),
     }
+}
+
+fn render_dx_type(ty: DxSchemaType) -> &'static str {
+    match ty {
+        DxSchemaType::Int => "Int",
+        DxSchemaType::Float => "Float",
+        DxSchemaType::Str => "Str",
+        DxSchemaType::Bool => "Bool",
+    }
+}
+
+fn escape_json(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn parse_field_spec(value: &str) -> Result<SchemaField, SchemaArtifactError> {
@@ -429,5 +507,25 @@ id = { type = "Int", nullable = false }
             render_artifact_summary(&artifact),
             "OK name=Customers provider=csv fields=6 format_version=0.1.0"
         );
+    }
+
+    #[test]
+    fn canonical_render_roundtrips() {
+        let artifact = load_artifact(&example_path("customers.dxschema.example")).expect("parse");
+        let rendered = render_artifact_canonical(&artifact);
+        let reparsed = parse_artifact(&rendered).expect("reparse");
+
+        assert_eq!(artifact, reparsed);
+    }
+
+    #[test]
+    fn json_render_contains_core_shape() {
+        let artifact = load_artifact(&example_path("sales.dxschema.example")).expect("parse");
+        let rendered = render_artifact_json(&artifact);
+
+        assert!(rendered.contains("\"schema\""));
+        assert!(rendered.contains("\"fields\""));
+        assert!(rendered.contains("\"provider\":\"parquet\""));
+        assert!(rendered.contains("\"revenue\":{\"type\":\"Float\",\"nullable\":false}"));
     }
 }
