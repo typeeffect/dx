@@ -11,6 +11,7 @@ It is intentionally narrow:
 - optionally verify it with LLVM tools
 - inspect executable planning
 - inspect runtime-stub packaging
+- prove the currently runnable executable-entry subset
 
 It does not claim that the whole language is executable yet.
 
@@ -58,6 +59,22 @@ The current canonical demo set lives in `examples/backend/` and currently includ
 - `py_call_dynamic.dx`
 - `py_call_throw.dx`
 
+Within that broader backend set, the current executable-entry fixtures are:
+
+- `main_returns_zero.dx`
+- `main_arithmetic.dx`
+- `main_closure_call_int.dx`
+
+Within that executable-entry fixture set, the currently runnable subset is
+currently narrower:
+
+- `main_returns_zero.dx`
+- `main_arithmetic.dx`
+
+`main_closure_call_int.dx` already satisfies the entrypoint contract, but it is
+not yet runnable semantically with the current runtime stub because ordinary
+closure calls still return stub defaults instead of executing the closure body.
+
 These demos are documented in:
 
 - `docs/DX_EXECUTABLE_DEMOS.md`
@@ -95,6 +112,24 @@ This only works when LLVM tools are available locally.
 
 ```bash
 cargo run -q -p dx-llvm-ir --bin dx-plan-exec -- examples/backend/closure_call_int.dx
+```
+
+### Build And Run A Native Executable
+
+```bash
+cargo run -q -p dx-llvm-ir --bin dx-run-exec -- --json examples/backend/main_arithmetic.dx
+```
+
+### Prove The Runnable Executable-Entry Subset
+
+```bash
+scripts/prove_executable_entry_subset.sh
+```
+
+When local LLVM tools are available, the same proof can force verification:
+
+```bash
+scripts/prove_executable_entry_subset.sh --verify
 ```
 
 ### Show Consolidated Backend Status
@@ -142,6 +177,13 @@ has coherent:
 - executable planning
 - runtime-stub symbol coverage
 
+The executable-entry proof script is the fastest way to check that the current
+runnable `main() -> Int` subset still:
+
+- builds through the native CLI
+- links against the runtime stub
+- exits with the expected integer status
+
 The status script is the fastest way to export the same operational state as:
 
 - human-readable Markdown
@@ -154,7 +196,7 @@ This workflow is not yet the final execution story.
 Major remaining steps:
 
 - broader runtime implementation beyond stubs
-- more complete executable coverage for closure call paths
+- more complete executable coverage for closure call and thunk paths
 - stronger real-toolchain execution loop
 - richer match/value flow beyond nominal tag checks
 

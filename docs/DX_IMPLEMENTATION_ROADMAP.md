@@ -63,6 +63,10 @@ The current minimal native executable entrypoint contract is documented in:
 
 - `docs/DX_EXECUTABLE_ENTRYPOINT_PLAN.md`
 
+The current proof workflow for the runnable executable-entry subset is:
+
+- `scripts/prove_executable_entry_subset.sh`
+
 ## Compiler Pipeline
 
 The intended pipeline is now:
@@ -86,6 +90,9 @@ Future extension planned after the executable backend baseline:
 Immediate executable-path constraint:
 
 - the first stable native executable contract is currently `fun main() -> Int`
+- the first runnable executable subset is currently narrower than the broader
+  executable-entry fixture set, because ordinary closure/thunk runtime hooks are
+  still semantic stubs
 
 ## Representation Roles
 

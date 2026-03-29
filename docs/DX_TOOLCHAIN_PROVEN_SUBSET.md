@@ -20,6 +20,9 @@ It does **not** mean:
 - the runtime behavior is fully semantic
 - every emitted program is already linked and run through a real LLVM toolchain
 
+The runnable executable-entry subset is tracked separately from this broader
+toolchain-proven backend subset.
+
 ## Current Canonical Demo Set
 
 The current canonical demos live in:
@@ -188,6 +191,33 @@ Operational status entrypoint:
 scripts/report_backend_status.sh
 scripts/report_backend_status.sh --json
 ```
+
+## Runnable Executable-Entry Subset
+
+The current executable-entry contract is documented in:
+
+- `docs/DX_EXECUTABLE_ENTRYPOINT_PLAN.md`
+
+The current runnable executable-entry proof workflow is:
+
+```bash
+scripts/prove_executable_entry_subset.sh
+```
+
+Today this runnable subset is intentionally narrower than the full backend demo
+set and narrower than the broader executable-entry fixture set.
+
+Currently runnable:
+
+- `examples/backend/main_returns_zero.dx`
+- `examples/backend/main_arithmetic.dx`
+
+Not yet runnable semantically with the current runtime stub:
+
+- `examples/backend/main_closure_call_int.dx`
+
+The blocker is concrete: ordinary closure-call and thunk runtime hooks still use
+stub behavior that preserves ABI shape but does not execute the closure body.
 
 ## Current Limits
 

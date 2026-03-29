@@ -43,6 +43,17 @@ bb0:
 
 That is enough to prove the first real end-to-end executable path.
 
+There is now also a canonical proof workflow for the currently runnable subset:
+
+```bash
+scripts/prove_executable_entry_subset.sh
+```
+
+At the moment, that runnable subset is narrower than the full executable-entry
+fixture set. Pure `main() -> Int` demos already run end-to-end; executable
+fixtures that rely on ordinary closure-call or thunk runtime semantics still
+depend on a richer runtime than the current stub.
+
 ## Important Constraint
 
 A module like:
@@ -110,6 +121,10 @@ The next backend-executable milestone should use this narrow contract:
 - prove `fun main() -> Int` end-to-end
 - add canonical executable-entry demos outside the current backend subset only
   when the workflow around `dx-build-exec` is stable
+- distinguish clearly between:
+  - executable-entry fixtures that satisfy the entrypoint contract
+  - runnable executable-entry fixtures that already execute correctly with the
+    current runtime stub
 - later decide how to widen entrypoint semantics
 
 ## Widening Options Later
