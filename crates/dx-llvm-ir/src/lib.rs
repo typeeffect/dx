@@ -9,6 +9,7 @@ pub use exec::{
     build_executable_plan_from_source,
     build_source_executable_plan,
     default_runtime_archive_path,
+    render_source_executable_plan,
     ExecutablePlan,
     SourceExecutablePlan,
 };

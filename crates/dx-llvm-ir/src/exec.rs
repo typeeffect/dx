@@ -56,6 +56,12 @@ pub fn build_source_executable_plan(input_dx: &Path, build_dir: &Path) -> Source
     }
 }
 
+pub fn render_source_executable_plan(plan: &SourceExecutablePlan) -> String {
+    let emit = plan.emit_command.join(" ");
+    let link = crate::link::render_link_plan(&plan.executable.link_plan);
+    [emit, link].join("\n")
+}
+
 pub fn default_runtime_archive_path() -> PathBuf {
     PathBuf::from("target")
         .join(default_target_profile_dir())
@@ -143,5 +149,19 @@ mod tests {
         );
         assert_eq!(plan.executable.ll_path, PathBuf::from("build/demo.ll"));
         assert_eq!(plan.executable.link_plan.object_path, PathBuf::from("build/demo.o"));
+    }
+
+    #[test]
+    fn rendered_source_executable_plan_is_deterministic() {
+        let a = build_source_executable_plan(
+            Path::new("examples/demo.dx"),
+            Path::new("build"),
+        );
+        let b = build_source_executable_plan(
+            Path::new("examples/demo.dx"),
+            Path::new("build"),
+        );
+
+        assert_eq!(render_source_executable_plan(&a), render_source_executable_plan(&b));
     }
 }
