@@ -1,0 +1,48 @@
+// Target example: custom gradient handlers — tracing and clipping
+//
+// Source: dx-03/src/test/resources/programs/dx_custom_grad.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX's AD is effect-based: the smooth effect can be intercepted by
+// custom handlers. This enables gradient tracing, clipping, scaling,
+// and other AD customizations without modifying the model function.
+
+// ── Traced grad: count operations during AD ──
+
+fun traced_grad(f: (Float) -> Float !smooth, x: Float) -> Float:
+    var add_ops = 0
+    var mul_ops = 0
+    val result = handle f(x) with:
+        smooth'add(a, b) ->
+            add_ops = add_ops + 1
+            resume(tape_add(a, b))
+        smooth'mul(a, b) ->
+            mul_ops = mul_ops + 1
+            resume(tape_mul(a, b))
+    .
+    print("add: {add_ops} mul: {mul_ops}")
+    backward(result)
+.
+
+// ── Clipped grad: per-contribution gradient clipping ──
+
+fun clipped_grad(f: (Float) -> Float !smooth, x: Float, clip: Float) -> Float:
+    val result = handle f(x) with:
+        smooth'mul(a, b) ->
+            val g = tape_mul(a, b)
+            // Clip each gradient contribution during backward
+            resume(clamp(g, 0.0 - clip, clip))
+    .
+    backward(result)
+.
+
+// d(100*x)/dx at x=1 = 100, but clipped to 10
+val g = clipped_grad((x) => 100.0 * x, 1.0, 10.0)
+print(g)    // 10.0
+
+// Key design point: the model function is pure — it just does arithmetic.
+// The handler decides HOW to differentiate. This is the power of
+// effect-based AD: separation of model from differentiation strategy.
+//
+// In traditional AD frameworks (JAX, PyTorch), custom gradient behavior
+// requires `custom_vjp` decorators or hooks. In DX, it's just a handler.

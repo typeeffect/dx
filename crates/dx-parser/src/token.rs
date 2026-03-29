@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Keyword {
+    Schema,
     Fun,
     If,
     Elif,

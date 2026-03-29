@@ -574,3 +574,9 @@ fun f(x: Int) -> Bool:
         x > 0
     .
 .
+
+--- schema_decl_basic
+schema Customers = csv.schema("data/customers.csv")
+
+--- schema_decl_using_refresh
+schema Sales = parquet.schema("data/sales.parquet") using "schemas/sales.dxschema" refresh

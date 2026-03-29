@@ -106,7 +106,7 @@ fn runtime_stub_symbols_contain_all_demo_required() {
 // ── demo set consistency ─────────────────────────────────────────
 
 /// The canonical demo set. This must match examples/backend/*.dx exactly.
-const CANONICAL_DEMOS: [&str; 23] = [
+const CANONICAL_DEMOS: [&str; 28] = [
     "arithmetic.dx",
     "closure_call_bool.dx",
     "closure_call_float.dx",
@@ -117,12 +117,17 @@ const CANONICAL_DEMOS: [&str; 23] = [
     "closure_call_two_args.dx",
     "closure_call_void_ret_three_args.dx",
     "main_arithmetic.dx",
+    "main_closure_call_bool.dx",
     "main_closure_call_int.dx",
+    "main_closure_call_multi_capture.dx",
+    "main_closure_call_nested.dx",
     "main_closure_call_subtract.dx",
     "main_closure_call_two_args.dx",
     "main_returns_zero.dx",
     "main_thunk_arithmetic.dx",
+    "main_thunk_bool.dx",
     "main_thunk_capture.dx",
+    "main_thunk_three_capture.dx",
     "match_nominal.dx",
     "match_with_closure_call.dx",
     "py_call_dynamic.dx",
@@ -337,14 +342,19 @@ fn build_exec_plan_with_custom_runtime_archive() {
 
 // ── executable-entry fixtures ────────────────────────────────────
 
-const EXECUTABLE_ENTRY_DEMOS: [&str; 7] = [
+const EXECUTABLE_ENTRY_DEMOS: [&str; 12] = [
     "main_arithmetic.dx",
+    "main_closure_call_bool.dx",
     "main_closure_call_int.dx",
+    "main_closure_call_multi_capture.dx",
+    "main_closure_call_nested.dx",
     "main_closure_call_subtract.dx",
     "main_closure_call_two_args.dx",
     "main_returns_zero.dx",
     "main_thunk_arithmetic.dx",
+    "main_thunk_bool.dx",
     "main_thunk_capture.dx",
+    "main_thunk_three_capture.dx",
 ];
 
 #[test]
@@ -490,14 +500,19 @@ fn run_exec_json_result_shape() {
 
 // ── runnable subset source-of-truth guards ──────────────────────
 
-const RUNNABLE_ENTRY_DEMOS: [&str; 7] = [
+const RUNNABLE_ENTRY_DEMOS: [&str; 12] = [
     "main_arithmetic.dx",
+    "main_closure_call_bool.dx",
     "main_closure_call_int.dx",
+    "main_closure_call_multi_capture.dx",
+    "main_closure_call_nested.dx",
     "main_closure_call_subtract.dx",
     "main_closure_call_two_args.dx",
     "main_returns_zero.dx",
     "main_thunk_arithmetic.dx",
+    "main_thunk_bool.dx",
     "main_thunk_capture.dx",
+    "main_thunk_three_capture.dx",
 ];
 
 #[test]
@@ -590,6 +605,29 @@ fn runnable_entry_expected_exit_codes_has_no_extra_entries() {
         assert!(
             RUNNABLE_ENTRY_DEMOS.contains(&name.as_str()),
             "exit code entry '{name}' is not in RUNNABLE_ENTRY_DEMOS — remove stale entry"
+        );
+    }
+}
+
+#[test]
+fn runnable_entry_expected_exit_codes_are_valid_integers() {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop();
+    path.pop();
+    path.push("scripts/runnable_entry_expected_exit_codes.txt");
+    let content = std::fs::read_to_string(&path).expect("read runnable_entry_expected_exit_codes.txt");
+    for line in content.lines().filter(|l| !l.is_empty()) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(
+            parts.len(), 2,
+            "expected 'demo_name exit_code' format, got: {line}"
+        );
+        let code: i32 = parts[1].parse().unwrap_or_else(|_| {
+            panic!("exit code '{}' for demo '{}' is not a valid integer", parts[1], parts[0])
+        });
+        assert!(
+            (0..=255).contains(&code),
+            "exit code {code} for demo '{}' is outside valid range 0-255", parts[0]
         );
     }
 }

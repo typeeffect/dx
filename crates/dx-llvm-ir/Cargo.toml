@@ -13,6 +13,7 @@ dx-parser = { path = "../dx-parser" }
 
 [dev-dependencies]
 dx-runtime-stub = { path = "../dx-runtime-stub" }
+dx-schema = { path = "../dx-schema" }
 
 [[bin]]
 name = "dx-emit-llvm"

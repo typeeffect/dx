@@ -1,6 +1,6 @@
 use crate::ast::{
     Arg, BinOp, Expr, FunctionDecl, ImportPyDecl, Item, LambdaBody, LambdaParam, MatchArm,
-    Module, Param, Pattern, Stmt, TypeExpr,
+    Module, Param, Pattern, SchemaDecl, Stmt, TypeExpr,
 };
 use crate::token::{Keyword, Token, TokenKind};
 
@@ -43,10 +43,62 @@ impl Parser {
         if self.at_keyword(Keyword::From) {
             return Ok(Item::ImportPy(self.parse_import_py()?));
         }
+        if self.at_keyword(Keyword::Schema) {
+            return Ok(Item::Schema(self.parse_schema_decl()?));
+        }
         if self.at_keyword(Keyword::Fun) {
             return Ok(Item::Function(self.parse_function_decl()?));
         }
         Ok(Item::Statement(self.parse_stmt()?))
+    }
+
+    fn parse_schema_decl(&mut self) -> Result<SchemaDecl, ParseError> {
+        self.expect_keyword(Keyword::Schema)?;
+        let name = self.expect_identifier()?;
+        self.expect(TokenKind::Equal)?;
+        let provider = self.expect_identifier()?;
+        self.expect(TokenKind::Dot)?;
+        self.expect_schema_member()?;
+        self.expect(TokenKind::LParen)?;
+        let source = self.expect_string()?;
+        self.expect(TokenKind::RParen)?;
+
+        let using_artifact = if self.at_identifier("using") {
+            self.bump();
+            Some(self.expect_string()?)
+        } else {
+            None
+        };
+
+        let refresh = if self.at_identifier("refresh") {
+            self.bump();
+            true
+        } else {
+            false
+        };
+
+        self.consume_optional_newline();
+        Ok(SchemaDecl {
+            name,
+            provider,
+            source,
+            using_artifact,
+            refresh,
+        })
+    }
+
+    fn expect_schema_member(&mut self) -> Result<(), ParseError> {
+        if self.at_keyword(Keyword::Schema) {
+            self.bump();
+            return Ok(());
+        }
+
+        let name = self.expect_identifier()?;
+        if name == "schema" {
+            return Ok(());
+        }
+
+        Err(ParseError::new("expected schema provider call"))
     }
 
     fn parse_import_py(&mut self) -> Result<ImportPyDecl, ParseError> {
@@ -139,7 +191,90 @@ impl Parser {
                 effects,
             });
         }
-        Ok(TypeExpr::Name(self.expect_identifier()?))
+        Ok(TypeExpr::Name(self.parse_named_type_text()?))
+    }
+
+    fn parse_named_type_text(&mut self) -> Result<String, ParseError> {
+        let mut name = self.expect_identifier()?;
+
+        while self.at(TokenKind::Dot) {
+            self.bump();
+            let segment = self.expect_identifier()?;
+            name.push('.');
+            name.push_str(&segment);
+        }
+
+        if self.at(TokenKind::LParen) {
+            self.bump();
+            let mut args = Vec::new();
+            if !self.at(TokenKind::RParen) {
+                loop {
+                    args.push(self.parse_type_expr_text()?);
+                    if !self.at(TokenKind::Comma) {
+                        break;
+                    }
+                    self.bump();
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+            name.push('(');
+            name.push_str(&args.join(", "));
+            name.push(')');
+        }
+
+        Ok(name)
+    }
+
+    fn parse_type_expr_text(&mut self) -> Result<String, ParseError> {
+        match self.parse_type_expr()? {
+            TypeExpr::Name(name) => Ok(name),
+            TypeExpr::Function {
+                params,
+                ret,
+                effects,
+            } => {
+                let mut out = String::from("(");
+                let params: Vec<String> = params
+                    .into_iter()
+                    .map(|param| self.render_type_expr_text(param))
+                    .collect();
+                out.push_str(&params.join(", "));
+                out.push_str(") -> ");
+                out.push_str(&self.render_type_expr_text(*ret));
+                for effect in effects {
+                    out.push(' ');
+                    out.push('!');
+                    out.push_str(&effect);
+                }
+                Ok(out)
+            }
+        }
+    }
+
+    fn render_type_expr_text(&self, ty: TypeExpr) -> String {
+        match ty {
+            TypeExpr::Name(name) => name,
+            TypeExpr::Function {
+                params,
+                ret,
+                effects,
+            } => {
+                let mut out = String::from("(");
+                let params: Vec<String> = params
+                    .into_iter()
+                    .map(|param| self.render_type_expr_text(param))
+                    .collect();
+                out.push_str(&params.join(", "));
+                out.push_str(") -> ");
+                out.push_str(&self.render_type_expr_text(*ret));
+                for effect in effects {
+                    out.push(' ');
+                    out.push('!');
+                    out.push_str(&effect);
+                }
+                out
+            }
+        }
     }
 
     fn parse_effects(&mut self) -> Result<Vec<String>, ParseError> {
@@ -702,6 +837,19 @@ impl Parser {
         }
     }
 
+    fn expect_string(&mut self) -> Result<String, ParseError> {
+        match self.peek_kind().cloned() {
+            Some(TokenKind::String(value)) => {
+                self.bump();
+                Ok(value)
+            }
+            _ => Err(ParseError::new(format!(
+                "expected string literal, found {}",
+                self.describe_current()
+            ))),
+        }
+    }
+
     fn expect_effect_name(&mut self) -> Result<String, ParseError> {
         match self.peek_kind().cloned() {
             Some(TokenKind::Identifier(name)) => {
@@ -735,6 +883,10 @@ impl Parser {
 
     fn peek_kind(&self) -> Option<&TokenKind> {
         self.tokens.get(self.pos).map(|t| &t.kind)
+    }
+
+    fn at_identifier(&self, expected: &str) -> bool {
+        matches!(self.peek_kind(), Some(TokenKind::Identifier(name)) if name == expected)
     }
 }
 
@@ -772,6 +924,7 @@ fn token_display(kind: &TokenKind) -> String {
 
 fn keyword_str(kw: &Keyword) -> &'static str {
     match kw {
+        Keyword::Schema => "schema",
         Keyword::Fun => "fun",
         Keyword::If => "if",
         Keyword::Elif => "elif",
@@ -844,6 +997,30 @@ fun demo() -> Unit:
                 assert_eq!(function.body.len(), 3);
             }
             other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_schema_declaration() {
+        let src = r#"
+schema Customers = csv.schema("data/customers.csv") using "schemas/customers.dxschema" refresh
+"#;
+        let tokens = Lexer::new(src).tokenize();
+        let mut parser = Parser::new(tokens);
+        let module = parser.parse_module().expect("module should parse");
+        assert_eq!(module.items.len(), 1);
+        match &module.items[0] {
+            Item::Schema(schema) => {
+                assert_eq!(schema.name, "Customers");
+                assert_eq!(schema.provider, "csv");
+                assert_eq!(schema.source, "data/customers.csv");
+                assert_eq!(
+                    schema.using_artifact.as_deref(),
+                    Some("schemas/customers.dxschema")
+                );
+                assert!(schema.refresh);
+            }
+            other => panic!("expected schema decl, got {other:?}"),
         }
     }
 
@@ -1100,6 +1277,32 @@ fun classify(flag: Bool, other: Bool) -> Str:
                 ret: Box::new(TypeExpr::Name("Str".into())),
                 effects: vec!["io".into(), "throw".into()],
             }
+        );
+    }
+
+    #[test]
+    fn qualified_type_name_in_param_and_return() {
+        let m = parse(
+            "fun f(row: Customers.Row) -> Sales.Row:\n    row\n.\n",
+        );
+        let f = first_fun(&m);
+        assert_eq!(f.params[0].ty, TypeExpr::Name("Customers.Row".into()));
+        assert_eq!(f.return_type, Some(TypeExpr::Name("Sales.Row".into())));
+    }
+
+    #[test]
+    fn applied_type_name_with_qualified_argument() {
+        let m = parse(
+            "fun f(rows: List(Customers.Row)) -> List(Sales.Row):\n    rows\n.\n",
+        );
+        let f = first_fun(&m);
+        assert_eq!(
+            f.params[0].ty,
+            TypeExpr::Name("List(Customers.Row)".into())
+        );
+        assert_eq!(
+            f.return_type,
+            Some(TypeExpr::Name("List(Sales.Row)".into()))
         );
     }
 

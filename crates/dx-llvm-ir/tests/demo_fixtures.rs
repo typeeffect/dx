@@ -8,7 +8,7 @@
 use dx_llvm_ir::pipeline::{emit_file_to_string, emit_file_to_string_unchecked};
 use std::path::PathBuf;
 
-const ALL_DEMOS: [&str; 23] = [
+const ALL_DEMOS: [&str; 28] = [
     "arithmetic.dx",
     "thunk.dx",
     "closure_call_int.dx",
@@ -27,11 +27,16 @@ const ALL_DEMOS: [&str; 23] = [
     "py_call_throw.dx",
     "main_returns_zero.dx",
     "main_arithmetic.dx",
+    "main_closure_call_bool.dx",
     "main_closure_call_int.dx",
+    "main_closure_call_multi_capture.dx",
+    "main_closure_call_nested.dx",
     "main_closure_call_subtract.dx",
     "main_closure_call_two_args.dx",
     "main_thunk_arithmetic.dx",
+    "main_thunk_bool.dx",
     "main_thunk_capture.dx",
+    "main_thunk_three_capture.dx",
 ];
 
 fn fixture_path(name: &str) -> PathBuf {

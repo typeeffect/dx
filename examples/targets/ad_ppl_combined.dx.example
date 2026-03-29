@@ -1,0 +1,111 @@
+// Target example: combined AD + probabilistic programming
+//
+// Source: synthetic — no direct dx-03 equivalent
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// This is the ultimate composability demo: differentiating through
+// a probabilistic scoring function. Two effects compose naturally:
+//   - smooth (AD) — computes gradients of the log-posterior
+//   - prob         — provides sample/observe semantics
+//
+// Use case: gradient-based variational inference.
+// The variational parameters are optimized by gradient descent
+// on the ELBO (evidence lower bound).
+
+effect smooth of once:
+    add(a: Float, b: Float) -> Float
+    mul(a: Float, b: Float) -> Float
+    sub(a: Float, b: Float) -> Float
+    div(a: Float, b: Float) -> Float
+    exp(a: Float) -> Float
+    log(a: Float) -> Float
+.
+
+effect prob of once:
+    sample(dist: Str, mu: Float, sigma: Float) -> Float
+    observe(dist: Str, mu: Float, sigma: Float, value: Float) -> Float
+.
+
+// ── Model: unknown mean, known variance ──
+// Prior: mu ~ Normal(0, 5)
+// Observation: x_obs ~ Normal(mu, 1) = 3.0
+
+fun model() -> Float !smooth !prob:
+    val mu = sample("normal", 0.0, 5.0)
+    observe("normal", mu, 1.0, 3.0)
+    mu
+.
+
+// ── Scoring function ──
+// Returns the log-probability of the model given variational parameters.
+// The variational distribution is q(mu) = Normal(q_mu, q_sigma).
+
+fun elbo(q_mu: Float, q_sigma: Float) -> Float !smooth:
+    // Reparameterization: mu = q_mu + q_sigma * epsilon
+    // where epsilon ~ Normal(0, 1)
+    val epsilon = 0.5    // fixed sample for gradient estimation
+    val mu = q_mu + q_sigma * epsilon
+
+    // Log q(mu | q_mu, q_sigma) — entropy term
+    val log_q = -0.5 * log(2.0 * 3.14159 * q_sigma * q_sigma)
+                - 0.5 * ((mu - q_mu) / q_sigma) * ((mu - q_mu) / q_sigma)
+
+    // Log p(mu) — prior: Normal(0, 5)
+    val log_prior = -0.5 * (mu / 5.0) * (mu / 5.0)
+
+    // Log p(x_obs | mu) — likelihood: Normal(mu, 1), x_obs = 3.0
+    val residual = 3.0 - mu
+    val log_lik = -0.5 * residual * residual
+
+    // ELBO = E_q[log p(x, z) - log q(z)]
+    log_prior + log_lik - log_q
+.
+
+// ── Gradient-based optimization ──
+// Optimize variational parameters q_mu, q_sigma by gradient ascent on ELBO.
+
+type VarParams:
+    mu: Float
+    sigma: Float
+.
+
+var params = VarParams(mu: 0.0, sigma: 1.0)
+val lr = 0.01
+
+for step in 0..200:
+    // AD computes gradients of ELBO w.r.t. variational parameters
+    val grads = grad((p) => elbo(p'mu, p'sigma), params)
+
+    // Gradient ascent (maximize ELBO)
+    params = VarParams(
+        mu: params'mu + lr * grads'mu,
+        sigma: params'sigma + lr * grads'sigma,
+    )
+.
+
+print("variational mean: {params'mu}")     // should converge near 2.88
+print("variational sigma: {params'sigma}") // should converge near ~0.98
+
+// Key design points:
+//
+// 1. TWO effects compose: smooth (AD) intercepts arithmetic during gradient
+//    computation, while the ELBO function itself is a probabilistic scoring
+//    function that could run under a prob handler for sampling.
+//
+// 2. The reparameterization trick is native: mu = q_mu + q_sigma * epsilon
+//    is just arithmetic. The smooth handler traces through it automatically.
+//    No special `rsample` vs `sample` distinction needed (unlike PyTorch).
+//
+// 3. grad() differentiates through the entire ELBO computation — prior,
+//    likelihood, and entropy terms. The model function is pure arithmetic
+//    under the smooth effect.
+//
+// 4. This is variational inference expressed as gradient ascent on a
+//    function. The same pattern extends to:
+//    - VAEs (variational autoencoders)
+//    - normalizing flows
+//    - score function estimation
+//    - differentiable rendering
+//
+// 5. Compared to Pyro/NumPyro: no decorator magic, no special random
+//    variable types, no plate notation. Just effects and handlers.

@@ -1,0 +1,62 @@
+// AD primitive provider lifecycle example
+//
+// Status: NOT YET IMPLEMENTED — this is a design target showing
+// the intended lifecycle for compile-time AD primitive acquisition.
+//
+// The pattern mirrors schema providers:
+// declare → discover/refresh → lock → build → use
+
+// ── Step 1: Declare with auto-discovery ──
+// The compiler symbolically differentiates the body to generate
+// the backward rule at compile time.
+
+smooth_primitive square(x: Float) -> Float:
+    x * x
+.
+// Auto-discovered backward: d/dx = 2x
+// Locked in artifact: .dxprim (future)
+
+// ── Step 2: Declare with explicit backward ──
+// When auto-discovery is insufficient (numerical stability, efficiency),
+// the user provides an explicit backward rule.
+
+smooth_primitive sigmoid(x: Float) -> Float:
+    1.0 / (1.0 + exp(0.0 - x))
+backward(x: Float, dout: Float) -> Float:
+    val s = 1.0 / (1.0 + exp(0.0 - x))
+    s * (1.0 - s) * dout
+.
+// Explicit backward: compiler trusts this rule instead of deriving one.
+
+// ── Step 3: Use in AD ──
+// smooth_primitives compose with the smooth effect.
+// Inside grad(), they participate in the tape.
+// Outside grad(), they are just normal functions.
+
+fun loss(x: Float) -> Float !smooth:
+    sigmoid(square(x))
+.
+
+val g = grad(loss, 2.0)
+print(g)
+
+// ── Lifecycle summary ──
+//
+// Intended developer workflow (future):
+//   1. Write `smooth_primitive f(x) ...` with optional `backward` block
+//   2. Compiler derives backward rule (auto or explicit)
+//   3. Rule is locked in a `.dxprim` artifact (future)
+//   4. Normal `dx build` reads the locked rule (no re-derivation)
+//   5. `dx prim refresh` re-derives if the body changes (future)
+//
+// Comparison with schema providers:
+//   - Schema: source → .dxschema → typed Row fields
+//   - AD prim: source → .dxprim → typed backward rule for the tape
+//   - Both: compile-time metadata, locked artifact, offline builds
+
+// ── What this enables ──
+//
+// 1. Users define new differentiable ops without touching the compiler
+// 2. Libraries ship .dxprim artifacts for custom math functions
+// 3. The compiler sees backward rules as typed, trusted metadata
+// 4. No runtime tracing cost for primitives with compile-time rules

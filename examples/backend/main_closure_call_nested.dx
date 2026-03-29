@@ -1,0 +1,5 @@
+fun main() -> Int:
+    val add = (x: Int, y: Int) => x + y
+    val mul = (x: Int, y: Int) => x * y
+    add(mul(6, 7), 0)
+.

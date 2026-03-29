@@ -1,0 +1,3 @@
+customers|csv|data/customers.csv|examples/schema/customers.dxschema.example|examples/schema/customers.dxschema.canonical
+orders|parquet|data/orders.parquet|examples/schema/orders.dxschema.example|examples/schema/orders.dxschema.canonical
+sales|parquet|data/sales.parquet|examples/schema/sales.dxschema.example|examples/schema/sales.dxschema.canonical

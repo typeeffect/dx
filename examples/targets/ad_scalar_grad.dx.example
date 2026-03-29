@@ -1,0 +1,43 @@
+// Target example: scalar automatic differentiation via grad()
+//
+// Source: dx-03/src/test/resources/programs/ad.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX computes gradients via algebraic effects. The smooth effect intercepts
+// arithmetic operations and builds a tape. grad() runs the function under
+// a smooth handler and returns the derivative.
+
+// Linear: d/dx (3x) = 3
+val d1 = grad((x) => x * 3.0, 1.0)
+print(d1)    // 3.0
+
+// Quadratic: d/dx (x^2) at x=3 = 6
+val d2 = grad((x) => x * x, 3.0)
+print(d2)    // 6.0
+
+// Cubic: d/dx (x^3) at x=4 = 48
+val d3 = grad((x) => x * x * x, 4.0)
+print(d3)    // 48.0
+
+// Polynomial: d/dx (x^3 + 2x) at x=2 = 14
+val d4 = grad((x) => x * x * x + 2.0 * x, 2.0)
+print(d4)    // 14.0
+
+// Higher-order: d^2/dx^2 (x^4) at x=5 = 300
+fun f(x: Float) -> Float:
+    x * x * x * x
+.
+fun f_prime(x: Float) -> Float:
+    grad(f, x)
+.
+val d6 = grad(f_prime, 5.0)
+print(d6)    // 300.0
+
+// Division: d/dx (1/x) at x=2 = -0.25
+val d7 = grad((x) => 1.0 / x, 2.0)
+print(d7)    // -0.25
+
+// Key design point: grad() is a dx function, not a compiler builtin.
+// It is implemented via handle...with over the smooth effect.
+// This means users can write custom gradient handlers (traced, clipped, etc.)
+// using the same mechanism.

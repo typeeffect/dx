@@ -55,6 +55,8 @@ set. The canonical runnable demos are:
 - `main_returns_zero.dx` (exit code 0)
 - `main_arithmetic.dx` (exit code 42)
 - `main_closure_call_int.dx` (exit code 42)
+- `main_closure_call_multi_capture.dx` (exit code 42)
+- `main_closure_call_nested.dx` (exit code 42)
 - `main_closure_call_subtract.dx` (exit code 42)
 - `main_closure_call_two_args.dx` (exit code 42)
 - `main_thunk_arithmetic.dx` (exit code 42)
@@ -141,3 +143,15 @@ Once the first executable contract is stable, the likely next choices are:
    it
 
 But none of these should block the current milestone.
+
+## Undefined Boundaries
+
+The following executable-entry behaviors are currently undefined and not part of
+the contract:
+
+- `main` with effects (`!io`, `!py`, `!throw`)
+- `main` with arguments
+- `main` returning `Unit`
+
+These are explicitly excluded from the current contract and will be addressed
+when the executable-program model is widened (Milestone E).

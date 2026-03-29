@@ -238,7 +238,13 @@ fn low_type_from_dx(ty: &Type) -> LowType {
         Type::Float => LowType::F64,
         Type::Bool => LowType::I1,
         Type::Unit => LowType::Void,
-        Type::Str | Type::PyObj | Type::Named(_) | Type::Function { .. } | Type::Unknown => {
+        Type::Str
+        | Type::PyObj
+        | Type::SchemaRow(_)
+        | Type::Option(_)
+        | Type::Named(_)
+        | Type::Function { .. }
+        | Type::Unknown => {
             LowType::Ptr
         }
     }

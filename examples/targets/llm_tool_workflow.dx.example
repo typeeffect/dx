@@ -1,0 +1,107 @@
+// Target example: LLM tool-oriented workflow
+//
+// Source: synthetic — LLM-first language direction
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX makes tool use a first-class workflow pattern, not an afterthought.
+// Tools are typed DX functions. The model selects and calls them through
+// a structured protocol. The effect system tracks what the model is
+// allowed to do.
+
+// ── Tool definitions as typed DX functions ──
+
+schema CustomerRecord:
+    id: Int
+    name: Str
+    email: Str
+    plan: Str
+.
+
+fun lookup_customer(email: Str) -> CustomerRecord !db:
+    query(Customers, where: it'email == email)
+.
+
+fun upgrade_plan(customer_id: Int, new_plan: Str) -> Bool !db:
+    update(Customers, where: it'id == customer_id, set: it'plan = new_plan)
+.
+
+fun send_email(to: Str, subject: Str, body: Str) -> Bool !io:
+    email_send(to: to, subject: subject, body: body)
+.
+
+// ── Tool registry ──
+// Tools are declared with their types and descriptions.
+// The model sees the type signatures, not implementation details.
+
+val tools = tool_registry(
+    tool("lookup_customer", lookup_customer,
+         description: "Find a customer by email address"),
+    tool("upgrade_plan", upgrade_plan,
+         description: "Upgrade a customer's subscription plan"),
+    tool("send_email", send_email,
+         description: "Send an email to a customer"),
+)
+
+// ── Agent loop ──
+// The model decides which tool to call. DX orchestrates the loop.
+// Each tool call is typed — the model cannot call upgrade_plan with
+// a string where an Int is expected.
+
+fun handle_request(request: Str) -> Str !llm !db !io:
+    var context = request
+    var done = false
+    var result = ""
+
+    while not done:
+        val action = model'plan(
+            prompt: context,
+            tools: tools,
+            max_steps: 5,
+        )
+
+        match action:
+            ToolCall(name, args) ->
+                val output = tools'execute(name, args)
+                context = context + "\n[tool: {name}] -> {output}"
+            FinalAnswer(answer) ->
+                result = answer
+                done = true
+        .
+    .
+
+    result
+.
+
+fun main() -> Unit !llm !db !io:
+    val response = handle_request(
+        "Find the customer with email alice@example.com, "
+        + "upgrade them to the enterprise plan, "
+        + "and send them a confirmation email."
+    )
+    print(response)
+.
+
+// Key design points:
+//
+// 1. Tools are TYPED DX FUNCTIONS. lookup_customer returns CustomerRecord,
+//    not a string. upgrade_plan takes (Int, Str), not arbitrary JSON.
+//    The compiler checks tool signatures at definition time.
+//
+// 2. Effects track what the model can do:
+//    - !llm: model calls
+//    - !db: database access
+//    - !io: email sending
+//    The effect signature of handle_request makes its capabilities explicit.
+//
+// 3. The agent loop is native DX control flow — while/match, not a
+//    framework-specific DSL. The model plans, DX orchestrates.
+//
+// 4. Tool execution is type-safe. The model's tool call arguments are
+//    validated against the function signature before execution. A malformed
+//    call fails before reaching the tool.
+//
+// 5. This is NOT "LangChain in DX". It is a language-level pattern where:
+//    - tools are functions with types and effects
+//    - the model is an effect (not a magic global)
+//    - orchestration is native control flow
+//    - the compiler knows what's happening at every step

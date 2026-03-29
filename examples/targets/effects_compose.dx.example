@@ -1,0 +1,48 @@
+-- Semantic target recovered from:
+-- /home/frapas/dx-lang/dx-03/src/test/resources/programs/effects_compose.dx
+
+effect Logger:
+    log(msg: Str) -> Unit
+.
+
+effect Counter:
+    tick() -> Int
+.
+
+fun composed_program() -> (Int, Int) !Logger !Counter:
+    log("start")
+    val first = tick()
+    log("middle")
+    val second = tick()
+    log("end")
+    (first, second)
+.
+
+fun main() -> Unit !io:
+    var log_count = 0
+
+    val pair =
+        handle
+            handle composed_program() with
+                tick():
+                    resume(1)
+            .
+        with
+            log(msg):
+                log_count = log_count + 1
+                print(msg)
+                resume(())
+        .
+
+    print(pair'0'str())
+    print(pair'1'str())
+    print(log_count'str())
+.
+
+-- Expected observable output:
+-- start
+-- middle
+-- end
+-- 1
+-- 1
+-- 3

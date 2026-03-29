@@ -4,6 +4,21 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+dx-parser = { path = "../dx-parser" }
+
 [[bin]]
 name = "dx-schema-validate"
 path = "src/bin/dx-schema-validate.rs"
+
+[[bin]]
+name = "dx-schema-match"
+path = "src/bin/dx-schema-match.rs"
+
+[[bin]]
+name = "dx-schema-new"
+path = "src/bin/dx-schema-new.rs"
+
+[[bin]]
+name = "dx-schema-refresh"
+path = "src/bin/dx-schema-refresh.rs"

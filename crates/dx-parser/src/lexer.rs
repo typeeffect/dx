@@ -159,6 +159,7 @@ impl<'a> Lexer<'a> {
         }
         let text = self.slice(start, self.pos);
         let kind = match text {
+            "schema" => TokenKind::Keyword(Keyword::Schema),
             "fun" => TokenKind::Keyword(Keyword::Fun),
             "if" => TokenKind::Keyword(Keyword::If),
             "elif" => TokenKind::Keyword(Keyword::Elif),
@@ -308,8 +309,9 @@ mod tests {
 
     #[test]
     fn all_v0_1_keywords() {
-        let k = kinds("fun if elif else type lazy val var match from import py me it");
+        let k = kinds("schema fun if elif else type lazy val var match from import py me it");
         let expected: Vec<TokenKind> = vec![
+            TokenKind::Keyword(Keyword::Schema),
             TokenKind::Keyword(Keyword::Fun),
             TokenKind::Keyword(Keyword::If),
             TokenKind::Keyword(Keyword::Elif),

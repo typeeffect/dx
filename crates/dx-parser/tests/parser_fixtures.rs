@@ -169,6 +169,8 @@ should_parse_test!(fixture_comparison_on_member_access, "comparison_on_member_ac
 should_parse_test!(fixture_operators_in_full_example, "operators_in_full_example");
 should_parse_test!(fixture_unit_literal, "unit_literal");
 should_parse_test!(fixture_gt_and_gte_operators, "gt_and_gte_operators");
+should_parse_test!(fixture_schema_decl_basic, "schema_decl_basic");
+should_parse_test!(fixture_schema_decl_using_refresh, "schema_decl_using_refresh");
 
 // ── future-unsupported fixtures ──────────────────────────────────
 

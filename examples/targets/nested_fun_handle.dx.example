@@ -1,0 +1,111 @@
+-- Semantic target recovered from:
+-- /home/frapas/dx-lang/dx-03/src/test/resources/programs/nested_fun_handle.dx
+
+effect Eff1:
+    op1() -> Int
+.
+
+fun local_helper_with_capture() -> Int !Eff1:
+    var acc = 0
+
+    fun add_op() -> Unit !Eff1:
+        acc = acc + op1()
+    .
+
+    add_op()
+    add_op()
+    add_op()
+    acc
+.
+
+fun local_helper_without_capture() -> Int !Eff1:
+    fun get_val() -> Int !Eff1:
+        op1()
+    .
+
+    get_val() + get_val()
+.
+
+fun local_in_branch(flag: Bool) -> Int:
+    var branch_value = 0
+
+    if flag:
+        fun set_branch() -> Unit:
+            branch_value = 42
+        .
+
+        set_branch()
+    .
+
+    branch_value
+.
+
+fun local_in_loop() -> Int:
+    var total = 0
+    var i = 0
+
+    while i < 3:
+        fun bump() -> Unit:
+            total = total + 1
+        .
+
+        bump()
+        i = i + 1
+    .
+
+    total
+.
+
+fun local_in_match(x: Int) -> Int:
+    var chosen = 0
+
+    match x:
+        1:
+            fun set_one() -> Unit:
+                chosen = 1
+            .
+
+            set_one()
+        2:
+            fun set_two() -> Unit:
+                chosen = 2
+            .
+
+            set_two()
+        _:
+            fun set_other() -> Unit:
+                chosen = 99
+            .
+
+            set_other()
+    .
+
+    chosen
+.
+
+fun main() -> Unit !io:
+    val captured =
+        handle local_helper_with_capture() with
+            op1():
+                resume(7)
+        .
+
+    val uncaptured =
+        handle local_helper_without_capture() with
+            op1():
+                resume(10)
+        .
+
+    print(captured'str())
+    print(uncaptured'str())
+    print(local_in_branch(true)'str())
+    print(local_in_loop()'str())
+    print(local_in_match(2)'str())
+.
+
+-- Expected observable output:
+-- 21
+-- 20
+-- 42
+-- 3
+-- 2

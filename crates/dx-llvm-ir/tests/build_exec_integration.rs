@@ -214,7 +214,7 @@ fn build_exec_rejects_non_int_main() {
     }
     let dir = build_dir();
     let bad_source = dir.join("bad_main.dx");
-    std::fs::write(&bad_source, "fun main() -> Unit:\n    42\n.\n").unwrap();
+    std::fs::write(&bad_source, "fun main() -> Str:\n    \"nope\"\n.\n").unwrap();
 
     let output = Command::new(dx_build_exec_bin())
         .args(["--json", "--runtime-archive"])
@@ -231,6 +231,63 @@ fn build_exec_rejects_non_int_main() {
     assert!(
         stderr.contains("invalid executable entrypoint"),
         "expected entrypoint contract error in stderr.\nstderr: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── runtime archive failure ────────────────────────────────────
+
+#[test]
+#[cfg(unix)]
+fn build_exec_fails_with_invalid_runtime_archive() {
+    if !has_llvm_tools() {
+        eprintln!("skipping: LLVM tools not available");
+        return;
+    }
+    let dir = build_dir();
+    let fake_archive = dir.join("fake.a");
+    std::fs::write(&fake_archive, "not a real archive").unwrap();
+
+    let output = Command::new(dx_build_exec_bin())
+        .args(["--json", "--runtime-archive"])
+        .arg(&fake_archive)
+        .arg(fixture_path("main_returns_zero.dx"))
+        .arg(&dir)
+        .output()
+        .expect("run dx-build-exec");
+
+    assert!(
+        !output.status.success(),
+        "invalid archive should fail.\nstdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+#[cfg(unix)]
+fn build_exec_fails_with_missing_runtime_archive() {
+    if !has_llvm_tools() {
+        eprintln!("skipping: LLVM tools not available");
+        return;
+    }
+    let dir = build_dir();
+    let missing = dir.join("nonexistent.a");
+
+    let output = Command::new(dx_build_exec_bin())
+        .args(["--json", "--runtime-archive"])
+        .arg(&missing)
+        .arg(fixture_path("main_returns_zero.dx"))
+        .arg(&dir)
+        .output()
+        .expect("run dx-build-exec");
+
+    assert!(
+        !output.status.success(),
+        "missing archive should fail.\nstdout: {}",
+        String::from_utf8_lossy(&output.stdout)
     );
 
     let _ = std::fs::remove_dir_all(&dir);

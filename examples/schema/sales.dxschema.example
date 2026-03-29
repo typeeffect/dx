@@ -1,0 +1,23 @@
+# Draft .dxschema artifact format — sales example
+#
+# This example shows a Parquet-backed schema with mixed types
+# including nullable and floating-point fields.
+
+[schema]
+format_version = "0.1.0"
+name = "Sales"
+provider = "parquet"
+source = "data/sales.parquet"
+source_fingerprint = "sha256:7a8b9c0d1e2f..."
+schema_fingerprint = "sha256:2f1e0d9c8b7a..."
+generated_at = "2026-03-29T10:30:00Z"
+
+[fields]
+id = { type = "Int", nullable = false }
+product_category = { type = "Str", nullable = false }
+region = { type = "Str", nullable = false }
+revenue = { type = "Float", nullable = false }
+quantity = { type = "Int", nullable = false }
+discount = { type = "Float", nullable = true }
+sale_date = { type = "Str", nullable = false }
+notes = { type = "Str", nullable = true }

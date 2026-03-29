@@ -1,0 +1,42 @@
+-- Semantic target recovered from:
+-- /home/frapas/dx-lang/dx-03/src/test/resources/programs/amb_basic.dx
+--
+-- This file is a new-style DX target, not a parser-stable fixture.
+
+effect Amb:
+    flip() -> Bool
+.
+
+fun two_flips() -> Unit !io !Amb:
+    val x = flip()
+    val y = flip()
+
+    if x:
+        if y:
+            print("TT")
+        else:
+            print("TF")
+        .
+    else:
+        if y:
+            print("FT")
+        else:
+            print("FF")
+        .
+    .
+.
+
+fun main() -> Unit !io:
+    handle
+        two_flips()
+        print("done")
+    with
+        flip():
+            resume(true)
+            resume(false)
+    .
+.
+
+-- Target claim:
+-- `flip()` is a multi-shot operation.
+-- A single handled program should explore both branches of each resume.

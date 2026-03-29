@@ -74,6 +74,7 @@ fn collect_function_effects(module: &hir::Module) -> HashMap<String, EffectSet> 
                 function.name.clone(),
                 function.effects.iter().cloned().collect::<EffectSet>(),
             )),
+            hir::Item::Schema(_) => None,
             _ => None,
         })
         .collect()

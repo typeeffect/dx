@@ -1,0 +1,7 @@
+Customers|examples/schema/customer_analysis.dx.example|examples/schema/customers.dxschema.example
+Customers|examples/schema/sales_analysis.dx.example|examples/schema/customers.dxschema.example
+Orders|examples/schema/sales_analysis.dx.example|examples/schema/orders.dxschema.example
+Sales|examples/schema/customer_analysis.dx.example|examples/schema/sales.dxschema.example
+Sales|examples/schema/sales_analysis.dx.example|examples/schema/sales.dxschema.example
+Customers|examples/schema/events_refresh.dx.example|examples/schema/customers.dxschema.example
+Events|examples/schema/events_refresh.dx.example|

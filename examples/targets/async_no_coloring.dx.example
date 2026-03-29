@@ -1,0 +1,98 @@
+-- Semantic target recovered from:
+-- /home/frapas/dx-lang/dx-03/src/test/resources/programs/async_no_coloring.dx
+--
+-- The point is not exact handler syntax.
+-- The point is that ordinary functions keep ordinary signatures while `!io`
+-- marks the effect boundary instead of introducing `async` coloring.
+
+effect Io:
+    read(path: Str) -> Str
+    write(path: Str, content: Str) -> Bool
+    fetch(url: Str) -> Str
+.
+
+effect Exn:
+    fail(msg: Str) -> Never
+.
+
+fun load_config(path: Str) -> Str !Io:
+    read(path)
+.
+
+fun save_result(path: Str, data: Str) -> Unit !Io:
+    write(path, data)
+    ()
+.
+
+fun fetch_page(url: Str) -> Str !Io:
+    fetch(url)
+.
+
+fun pipeline(config_path: Str, api_url: Str) -> Str !Io:
+    val cfg = load_config(config_path)
+    val page = fetch_page(api_url)
+    "config=" + cfg + " page=" + page
+.
+
+fun dry_run_plan() -> (Str, List[Str]) !Io:
+    var ops = list_new[Str]()
+
+    val result =
+        handle
+            save_result("/tmp/out.txt", "data")
+            load_config("/tmp/cfg.txt")
+            fetch_page("https://api.example.com")
+            "planned"
+        with
+            read(path):
+                ops = list_push(ops, "READ:" + path)
+                resume("dry")
+            write(path, content):
+                ops = list_push(ops, "WRITE:" + path)
+                resume(true)
+            fetch(url):
+                ops = list_push(ops, "FETCH:" + url)
+                resume("dry")
+        .
+
+    (result, ops)
+.
+
+fun main() -> Unit !io:
+    val mocked =
+        handle pipeline("/etc/prod.conf", "https://api.example.com") with
+            read(_):
+                resume("mock-config")
+            write(_, _):
+                resume(true)
+            fetch(_):
+                resume("mock-response")
+        .
+
+    print(mocked)
+
+    val planned = dry_run_plan()
+    print(planned'0)
+    print(planned'1'len()'str())
+
+    val fallback =
+        handle
+            handle load_config("/missing.conf") with
+                read(path):
+                    fail("file not found: " + path)
+            .
+        with
+            fail(msg):
+                print("ERROR: " + msg)
+                resume("fallback-value")
+        .
+
+    print(fallback)
+.
+
+-- Target claims:
+-- 1. No `async` keyword is needed on `load_config`, `save_result`, or `pipeline`.
+-- 2. Different handlers can interpret the same `!Io` program as:
+--    - mock execution
+--    - dry-run planning
+--    - fallible execution

@@ -1,0 +1,65 @@
+-- Semantic target recovered from:
+-- /home/frapas/dx-lang/dx-03/src/test/resources/programs/effects_run.dx
+--
+-- This file is a new-style DX target, not a parser-stable fixture.
+
+effect Exn:
+    raise(msg: Str) -> Never
+.
+
+effect State:
+    get() -> Int
+    put(next: Int) -> Int
+.
+
+effect Log:
+    write(msg: Str) -> Unit
+.
+
+fun exception_demo() -> Unit !io !Exn:
+    print("try")
+    raise("caught!")
+    print("unreachable")
+.
+
+fun state_demo() -> Unit !io !State:
+    val current = get()
+    print(current'str())
+    val next = put(current + 1)
+    print(next'str())
+.
+
+fun log_demo() -> Unit !io !Log:
+    write("hello")
+    write("world")
+    print("done")
+.
+
+fun main() -> Unit !io:
+    handle exception_demo() with
+        raise(msg):
+            print(msg)
+    .
+
+    handle state_demo() with
+        get():
+            resume(42)
+        put(next):
+            resume(next)
+    .
+
+    handle log_demo() with
+        write(msg):
+            print(msg)
+            resume(())
+    .
+.
+
+-- Expected observable output:
+-- try
+-- caught!
+-- 42
+-- 43
+-- hello
+-- world
+-- done

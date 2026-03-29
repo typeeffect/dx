@@ -1,0 +1,85 @@
+// Schema refresh workflow example
+//
+// Parser-stable: the `schema ... refresh` declaration parses in the current
+// dx-parser. The pipeline syntax is still a semantic target.
+//
+// This example shows the explicit refresh lifecycle:
+//
+//   1. Declare a schema with `refresh` — tells the toolchain to re-query
+//      the datasource and update the locked artifact.
+//
+//   2. Normal builds consume the locked .dxschema artifact without ever
+//      touching the datasource.
+//
+//   3. `dx schema refresh` is a separate explicit step, not part of
+//      normal compilation.
+//
+// Why refresh exists:
+//
+// - Datasources evolve: columns are added, types change, tables are renamed.
+// - Without refresh, the locked artifact becomes stale silently.
+// - With refresh, the developer explicitly re-acquires the schema, reviews
+//   the diff in version control, and commits the updated artifact.
+// - Normal builds stay deterministic and offline.
+
+// ── Normal locked declaration ──
+// This schema uses a locked artifact. Normal builds read the artifact.
+// The datasource is never queried during compilation.
+
+schema Customers = csv.schema("data/customers.csv") using "schemas/customers.dxschema"
+
+// ── Refresh declaration ──
+// Adding `refresh` tells the toolchain to re-query the datasource.
+// This is used during `dx schema refresh`, NOT during normal builds.
+//
+// Workflow:
+//   $ dx schema refresh                          # re-query all refresh-marked schemas
+//   $ dx schema refresh schemas/events.dxschema  # re-query a specific artifact
+//   $ git diff schemas/                          # review changes
+//   $ git commit -m "update events schema"       # commit the updated artifact
+//   $ dx build                                   # normal build uses the new artifact
+
+schema Events = parquet.schema("data/events.parquet") refresh
+
+// ── Analysis using both schemas ──
+
+fun recent_customer_events(
+    customers: List(Customers.Row),
+    events: List(Events.Row),
+) -> Table:
+    events
+      join: customers on: events'customer_id == customers'id
+      where: events'event_date > "2026-01-01"
+      select:
+        customer: customers'name
+        event_type: events'event_type
+        timestamp: events'event_date
+      order_by: timestamp desc
+.
+
+fun main() -> Unit !io:
+    val customers = load(Customers, "data/customers.csv")
+    val events = load(Events, "data/events.parquet")
+
+    val recent = recent_customer_events(customers, events)
+    print(recent)
+.
+
+// Key design points:
+//
+// 1. LOCKED BY DEFAULT. `using "..."` means the build is offline.
+//    No network access, no credentials, no datasource dependency.
+//
+// 2. REFRESH IS EXPLICIT. `refresh` is a separate workflow step.
+//    The developer decides when to re-query. The build never surprises.
+//
+// 3. REVIEWABLE DIFFS. Schema changes show up as artifact diffs in
+//    version control. New columns, type changes, and removed fields
+//    are visible before they affect code.
+//
+// 4. STALE DETECTION. If the source fingerprint in the artifact does
+//    not match the current datasource definition, the build warns.
+//    If the schema fingerprint changes, the build flags it.
+//
+// 5. MIXED MODE. A single file can use both locked and refresh schemas.
+//    Customers is stable (locked), Events evolves (refresh-marked).

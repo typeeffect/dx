@@ -1,0 +1,109 @@
+// Target example: quantized inference pipeline — no Python at deployment
+//
+// Source: synthetic — edge/embedded AI direction
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// Quantized inference uses compact integer types (Int8, Int16) instead of
+// Float32 for model weights and activations. This reduces memory usage 4x
+// and enables deployment on constrained hardware.
+//
+// DX's memory model (SharedBuffer, TensorStorage) and native compilation
+// make this natural — no framework overhead, no dynamic type dispatch.
+
+// ── Quantized model types ──
+
+type QuantizedLayer:
+    weights: TensorStorage(Int8, shape: [*, *])
+    bias: TensorStorage(Int32, shape: [*])
+    scale: Float         // quantization scale factor
+    zero_point: Int8     // quantization zero point
+.
+
+type QuantizedModel:
+    conv1: QuantizedLayer
+    conv2: QuantizedLayer
+    fc: QuantizedLayer
+.
+
+// ── Quantized inference primitives ──
+
+fun quantized_matmul(
+    input: TensorView(Int8),
+    layer: QuantizedLayer,
+) -> TensorStorage(Int8):
+    // Integer matmul → Int32 accumulator → rescale → Int8 output
+    val acc = matmul_i8_to_i32(input, layer'weights)
+    val with_bias = add_i32(acc, layer'bias)
+    val rescaled = rescale_i32_to_i8(with_bias, layer'scale, layer'zero_point)
+    rescaled
+.
+
+fun quantized_relu(input: TensorStorage(Int8), zero_point: Int8) -> TensorStorage(Int8):
+    // ReLU in quantized domain: max(x, zero_point)
+    tensor_map(input, (x) => max(x, zero_point))
+.
+
+// ── Full inference pipeline ──
+
+fun QuantizedModel'infer(input: TensorStorage(Int8)) -> TensorStorage(Int8):
+    val arena = Arena'new()
+
+    // Conv1 + ReLU
+    val h1 = quantized_matmul(input'view(), me'conv1)
+    val a1 = quantized_relu(h1, me'conv1'zero_point)
+
+    // Conv2 + ReLU
+    val h2 = quantized_matmul(a1'view(), me'conv2)
+    val a2 = quantized_relu(h2, me'conv2'zero_point)
+
+    // Fully connected (output layer)
+    val output = quantized_matmul(a2'view(), me'fc)
+
+    arena'reset()
+    output
+.
+
+// ── Deployment entry point ──
+
+fun main() -> Int:
+    // Load quantized model from compact binary format (no Python pickle)
+    val model = load_quantized_model("model.dxq")
+
+    // Load input from shared buffer (e.g., camera frame, preprocessed sensor batch)
+    val pool = SharedBufferPool(Int8)'new()
+    val mut buf = pool'acquire_for_shape([1, 28, 28])
+    buf'extend_from_slice(read_input_bytes("input.bin"))
+    val input = buf'freeze_into_tensor([1, 28, 28])
+
+    // Run inference
+    val output = model'infer(input)
+
+    // Argmax for classification
+    val predicted = argmax_i8(output'view())
+    print("predicted: {predicted}")
+
+    predicted
+.
+
+// Key design points:
+//
+// 1. QUANTIZED TYPES. Int8 weights and activations — 4x smaller than Float32.
+//    DX's type system tracks the element type through the pipeline.
+//
+// 2. INTEGER ARITHMETIC. Matmul accumulates in Int32, rescales to Int8.
+//    No floating-point unit needed — runs on microcontrollers.
+//
+// 3. POOL-BACKED ALLOCATION. SharedBufferPool reuses buffers across frames.
+//    freeze_into_tensor gives typed tensor access without copying.
+//
+// 4. ARENA TEMPORARIES. Intermediate activations live in an arena.
+//    Bulk-released after each inference — no fragmentation.
+//
+// 5. NATIVE BINARY. DX compiles to LLVM. The deployed binary has:
+//    - no Python runtime
+//    - no garbage collector
+//    - no dynamic library dependencies beyond libc
+//    - deterministic memory usage
+//
+// 6. main() -> Int. The executable contract is satisfied.
+//    The predicted class index is the exit code — testable end-to-end.

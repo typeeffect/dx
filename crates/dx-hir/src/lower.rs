@@ -25,6 +25,7 @@ impl Lowerer {
 
     fn lower_item(&mut self, item: &ast::Item) -> hir::Item {
         match item {
+            ast::Item::Schema(schema) => hir::Item::Schema(schema.clone()),
             ast::Item::ImportPy(import) => hir::Item::ImportPy(import.clone()),
             ast::Item::Function(function) => hir::Item::Function(self.lower_function(function)),
             ast::Item::Statement(stmt) => hir::Item::Statement(self.lower_stmt(stmt, &None)),

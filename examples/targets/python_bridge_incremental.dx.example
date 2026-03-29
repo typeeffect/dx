@@ -1,0 +1,105 @@
+// Target example: incremental Python bridge — staged migration path
+//
+// Source: synthetic — based on docs/PY_INTEROP_ARCHITECTURE.md direction
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX treats Python as a foreign ecosystem, not as the semantic host.
+// The bridge enables incremental adoption: start with Python libraries
+// you already use, gradually replace hot paths with native DX.
+
+// ── Stage 1: import Python libraries at the foreign boundary ──
+
+from py sklearn.linear_model import LinearRegression
+from py sklearn.metrics import mean_squared_error
+from py pandas import read_csv
+
+// ── Stage 2: use PyObj at the boundary, native DX for logic ──
+
+fun load_data(path: Str) -> PyObj !py:
+    val df = read_csv(path)
+    df
+.
+
+fun train_sklearn(X: PyObj, y: PyObj) -> PyObj !py:
+    val model = LinearRegression()
+    model'fit(X, y)
+    model
+.
+
+fun evaluate(model: PyObj, X: PyObj, y: PyObj) -> Float !py:
+    val predictions = model'predict(X)
+    val mse = mean_squared_error(y, predictions)
+    mse'item()     // PyObj -> Float at the boundary
+.
+
+// ── Stage 3: native DX logic wrapping the Python calls ──
+
+fun pipeline(train_path: Str, test_path: Str) -> Float !py !io:
+    val train = load_data(train_path)
+    val test = load_data(test_path)
+
+    val X_train = train'drop("target", axis: 1)
+    val y_train = train["target"]
+    val X_test = test'drop("target", axis: 1)
+    val y_test = test["target"]
+
+    val model = train_sklearn(X_train, y_train)
+    val mse = evaluate(model, X_test, y_test)
+
+    print("MSE: {mse}")
+    mse
+.
+
+// ── Stage 4: replace hot path with native DX ──
+// Once DX has tensor ops + AD, the training loop moves to native code.
+// The Python bridge stays only for data loading or legacy libraries.
+
+schema TrainData = csv.schema("data/train.csv")
+
+fun native_pipeline(train_path: Str) -> Float !io:
+    val data = load(TrainData, train_path)
+
+    // Native DX: typed, compiled, no Python runtime
+    val X = data'select(it'feature_1, it'feature_2, it'feature_3)
+    val y = data'select(it'target)
+
+    // Native linear regression (future: with effect-based AD)
+    val weights = least_squares(X, y)
+    val predictions = X o weights
+    val mse = mean((predictions - y) * (predictions - y))
+
+    print("native MSE: {mse}")
+    mse
+.
+
+fun main() -> Unit !io !py:
+    // Start with Python bridge
+    val py_mse = pipeline("data/train.csv", "data/test.csv")
+
+    // Migrate to native DX
+    val native_mse = native_pipeline("data/train.csv")
+
+    print("Python MSE:  {py_mse}")
+    print("Native MSE:  {native_mse}")
+.
+
+// Key design points:
+//
+// 1. Python is FOREIGN, not the host. Every Python call is marked with !py.
+//    The effect system tracks where Python is used — it's not hidden.
+//
+// 2. PyObj is the boundary type. It is opaque to DX's type system.
+//    Field access on PyObj (model'fit, df'drop) is dynamic, not typed.
+//
+// 3. The migration path is incremental:
+//    - Stage 1: import Python libraries
+//    - Stage 2: wrap Python calls in DX functions
+//    - Stage 3: DX orchestrates the workflow
+//    - Stage 4: replace Python calls with native DX as features land
+//
+// 4. Native DX code is typed, compiled to LLVM, and has no Python dependency.
+//    The schema provider gives typed field access. The pipeline syntax is native.
+//
+// 5. This is NOT "Python with types". It is a native language with an explicit
+//    foreign bridge. The goal is to make Python unnecessary for the typed core,
+//    while keeping it available as an escape hatch.

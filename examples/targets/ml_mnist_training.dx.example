@@ -1,0 +1,89 @@
+// Target example: MNIST training with dx-level AD
+//
+// Source: dx-03/src/test/resources/programs/mnist_dx_grad.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// This is the flagship ML demo: a real neural network trained end-to-end
+// using DX's effect-based automatic differentiation. The smooth effect
+// intercepts all arithmetic and builds a tape for backpropagation.
+//
+// Architecture: 784 -> 128 (relu) -> 10 (softmax) + cross-entropy loss
+
+// ── Network type ──
+
+type Net:
+    w1: Tensor(128, 784)
+    b1: Tensor(128)
+    w2: Tensor(10, 128)
+    b2: Tensor(10)
+.
+
+// ── Forward pass ──
+// Uses `o` for matmul, `+` for bias add (broadcasting)
+
+fun Net'apply(x: Tensor(784)) -> Tensor(10):
+    val h = relu(me'w1 o x + me'b1)
+    softmax(me'w2 o h + me'b2)
+.
+
+// ── Loss function ──
+
+fun loss(net: Net, x: Tensor(784), label: Int) -> Float:
+    val probs = net'apply(x)
+    neg_log(probs, label)
+.
+
+// ── Data ──
+
+val data = load_mnist("data/mnist", train: 60000, test: 10000)
+val train_x = data'train_images
+val train_y = data'train_labels
+val test_x = data'test_images
+val test_y = data'test_labels
+
+// ── Training loop ──
+
+var net = Net(
+    w1: random_mat(128, 784, seed: 42, scale: 0.01),
+    b1: zeros_vec(128),
+    w2: random_mat(10, 128, seed: 43, scale: 0.01),
+    b2: zeros_vec(10),
+)
+val lr = 0.001
+
+for epoch in 0..20:
+    for (x, label) in train_x'zip(train_y):
+        // grad() via smooth effect — the entire forward pass is traced
+        val grads = d loss(net, x, label) / d net
+        net = net - lr * grads
+    .
+
+    // Test accuracy
+    var correct = 0
+    for (x, label) in test_x'zip(test_y):
+        val probs = net'apply(x)
+        if argmax(probs) == label:
+            correct = correct + 1
+        .
+    .
+
+    val accuracy = correct * 100 / test_x'len
+    print("epoch {epoch}  acc {correct}/{test_x'len} ({accuracy}%)")
+.
+
+// Key design points:
+//
+// 1. grad() is a DX function, not a compiler builtin — it uses handle...with
+//    over the smooth effect to build a tape and compute gradients.
+//
+// 2. The model (Net'apply) is a pure function. It never knows it's being
+//    differentiated. The handler intercepts +, *, matmul, relu, softmax.
+//
+// 3. The `d loss(net, x, label) / d net` syntax is sugar for grad() over
+//    a record type. Each field gets its own gradient tensor.
+//
+// 4. Field access uses genitivo sassone: net'w1, me'b1, data'train_images.
+//    This is not dot notation — it's possessive grammar.
+//
+// 5. This same mechanism extends to custom gradient handlers (traced_grad,
+//    clipped_grad) without any changes to the model function.

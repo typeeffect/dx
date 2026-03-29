@@ -5,6 +5,7 @@ use dx_parser::{Item, Lexer, Parser};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutablePlan {
@@ -46,6 +47,7 @@ pub enum ExecutableBuildError {
     Toolchain(ToolchainError),
     Io(std::io::Error),
     MissingTool(&'static str),
+    StaleRuntimeArchive(PathBuf),
     InvalidEntrypoint(&'static str),
     CommandFailed {
         tool: String,
@@ -61,6 +63,11 @@ impl std::fmt::Display for ExecutableBuildError {
             ExecutableBuildError::Toolchain(err) => write!(f, "{err}"),
             ExecutableBuildError::Io(err) => write!(f, "i/o error: {err}"),
             ExecutableBuildError::MissingTool(tool) => write!(f, "missing build tool: {tool}"),
+            ExecutableBuildError::StaleRuntimeArchive(path) => write!(
+                f,
+                "runtime archive is stale: {} (rebuild with `cargo build -p dx-runtime-stub`)",
+                path.display()
+            ),
             ExecutableBuildError::InvalidEntrypoint(message) => {
                 write!(f, "invalid executable entrypoint: {message}")
             }
@@ -226,6 +233,7 @@ pub fn materialize_source_executable_plan(
     ensure_source_executable_entrypoint_contract(&plan.input_dx)?;
     emit_file_to_path(&plan.input_dx, &plan.executable.ll_path)?;
     ensure_minimal_executable_entrypoint(&plan.executable.ll_path)?;
+    ensure_runtime_archive_is_fresh(&plan.executable.runtime_archive)?;
     execute_link_plan(&plan.executable.link_plan, tools)
 }
 
@@ -239,6 +247,7 @@ pub fn materialize_verified_executable_plan(
     ensure_source_executable_entrypoint_contract(&plan.source.input_dx)?;
     emit_file_to_path_and_verify(&plan.source.input_dx, &plan.source.executable.ll_path)?;
     ensure_minimal_executable_entrypoint(&plan.source.executable.ll_path)?;
+    ensure_runtime_archive_is_fresh(&plan.source.executable.runtime_archive)?;
     execute_link_plan(&plan.source.executable.link_plan, tools)
 }
 
@@ -377,6 +386,67 @@ fn ensure_source_executable_entrypoint_contract(
     }
 
     Ok(())
+}
+
+fn ensure_runtime_archive_is_fresh(runtime_archive: &Path) -> Result<(), ExecutableBuildError> {
+    let crate_root = runtime_stub_crate_root();
+    if !crate_root.is_dir() || !looks_like_runtime_stub_archive(runtime_archive) {
+        return Ok(());
+    }
+    ensure_runtime_archive_is_fresh_with_root(runtime_archive, &crate_root)
+}
+
+fn ensure_runtime_archive_is_fresh_with_root(
+    runtime_archive: &Path,
+    crate_root: &Path,
+) -> Result<(), ExecutableBuildError> {
+    let archive_mtime = std::fs::metadata(runtime_archive)?.modified()?;
+    let source_mtime = newest_runtime_stub_source_mtime(crate_root)?;
+    if archive_mtime < source_mtime {
+        return Err(ExecutableBuildError::StaleRuntimeArchive(
+            runtime_archive.to_path_buf(),
+        ));
+    }
+    Ok(())
+}
+
+fn newest_runtime_stub_source_mtime(crate_root: &Path) -> Result<SystemTime, ExecutableBuildError> {
+    let mut newest = std::fs::metadata(crate_root.join("Cargo.toml"))?.modified()?;
+    collect_newest_mtime(&crate_root.join("src"), &mut newest)?;
+    Ok(newest)
+}
+
+fn collect_newest_mtime(dir: &Path, newest: &mut SystemTime) -> Result<(), ExecutableBuildError> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            collect_newest_mtime(&path, newest)?;
+            continue;
+        }
+        let modified = metadata.modified()?;
+        if modified > *newest {
+            *newest = modified;
+        }
+    }
+    Ok(())
+}
+
+fn looks_like_runtime_stub_archive(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name == default_runtime_archive_filename())
+        .unwrap_or(false)
+}
+
+fn runtime_stub_crate_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("crates")
+        .join("dx-runtime-stub")
 }
 
 fn find_tool_with_env<F, G>(env_key: &str, name: &str, get_var: F, split_paths_fn: G) -> Option<PathBuf>
@@ -754,6 +824,50 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "invalid executable entrypoint: effectful `main` is outside the current executable contract"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn accepts_fresh_runtime_archive() {
+        let base = temp_dir();
+        let crate_root = base.join("dx-runtime-stub");
+        fs::create_dir_all(crate_root.join("src")).expect("mkdir");
+        fs::write(crate_root.join("Cargo.toml"), "[package]\nname = \"dx-runtime-stub\"\n")
+            .expect("write cargo");
+        fs::write(crate_root.join("src").join("lib.rs"), "pub fn stub() {}\n")
+            .expect("write lib");
+        let archive = base.join(default_runtime_archive_filename());
+        fs::write(&archive, "").expect("write archive");
+
+        ensure_runtime_archive_is_fresh_with_root(&archive, &crate_root).expect("fresh archive");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rejects_stale_runtime_archive() {
+        let base = temp_dir();
+        let crate_root = base.join("dx-runtime-stub");
+        fs::create_dir_all(crate_root.join("src")).expect("mkdir");
+        fs::write(crate_root.join("Cargo.toml"), "[package]\nname = \"dx-runtime-stub\"\n")
+            .expect("write cargo");
+        let archive = base.join(default_runtime_archive_filename());
+        fs::write(&archive, "").expect("write archive");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(crate_root.join("src").join("lib.rs"), "pub fn changed() {}\n")
+            .expect("write lib");
+
+        let err =
+            ensure_runtime_archive_is_fresh_with_root(&archive, &crate_root).expect_err("stale");
+
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "runtime archive is stale: {} (rebuild with `cargo build -p dx-runtime-stub`)",
+                archive.display()
+            )
         );
 
         let _ = fs::remove_dir_all(&base);

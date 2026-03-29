@@ -4,6 +4,13 @@
 
 This document defines the direction for compile-time schema acquisition in `dx`.
 
+Schema should be treated as the **first concrete compile-time provider kind**,
+not as a standalone one-off subsystem.
+
+Reference:
+
+- `docs/DX_COMPILETIME_PROVIDERS_PLAN.md`
+
 The goal is:
 
 - typesafe access to external data shapes
@@ -179,6 +186,22 @@ Schema providers and Python interop solve different problems.
 
 The long-term direction should prefer schema providers for typesafe data access, while keeping Python interop available as a foreign escape hatch.
 
+## Relation To The Memory Model
+
+Schema providers and the memory model solve different layers of the system.
+
+- schema providers give `dx` a typed description of external data shape
+- the memory model governs how rows, buffers, and future tensors live at runtime
+
+The intended direction is compatible with:
+
+- regions / arenas for temporary query and inference intermediates
+- explicit shared buffers for long-lived dataset/model-backed storage
+
+Reference:
+
+- `docs/DX_MEMORY_MODEL_PLAN.md`
+
 ## v0 Direction
 
 The first practical slice should be intentionally small:
@@ -190,3 +213,69 @@ The first practical slice should be intentionally small:
 5. explicit refresh command
 
 This is enough to validate the architecture without overcommitting to a large provider ecosystem too early.
+
+## Design Reference
+
+Design-validation examples:
+
+- `examples/schema/customer_analysis.dx.example` — intended DX source surface
+- `examples/schema/customers.dxschema.example` — draft locked artifact format
+
+### Source Surface Example
+
+The source example shows:
+
+- schema declaration syntax (`schema X = csv.schema(...)`)
+- nominal `X.Row` type usage
+- field access with genitivo sassone (`it'field`)
+- cached artifact form (`using "path.dxschema"`)
+- explicit refresh semantics
+
+### Artifact Format Example
+
+The `.dxschema` artifact example shows:
+
+- schema name, provider kind, and source path
+- source fingerprint (detects datasource definition changes)
+- schema fingerprint (detects actual schema changes)
+- field list with types and nullability
+- generation timestamp
+
+The artifact is:
+
+- **deterministic**: same source → same artifact
+- **reviewable**: plain text, suitable for version control
+- **offline-capable**: normal builds consume the artifact, never query the datasource
+
+### Build / Refresh Lifecycle
+
+```
+dx schema refresh             # re-query all datasources, update .dxschema artifacts
+dx schema refresh path.dxschema  # refresh a single artifact
+dx build                      # consume locked artifacts, never query datasources
+```
+
+Normal builds fail clearly if:
+
+- the `.dxschema` artifact is missing
+- the artifact is invalid or corrupted
+- the source declaration and artifact disagree (provider mismatch, name mismatch)
+
+Refresh fails clearly if:
+
+- the datasource is inaccessible
+- the schema surface is unsupported
+
+## Current Implementation Status
+
+Schema providers are planned, not implemented.
+
+No parser, type-system, or compiler support exists yet.
+The current implementation priority is documented in `docs/DX_IMPLEMENTATION_ROADMAP.md`
+under Post-Baseline Milestone F.
+
+## Specification
+
+The draft artifact format specification is at:
+
+- `docs/DX_SCHEMA_ARTIFACT_SPEC.md`

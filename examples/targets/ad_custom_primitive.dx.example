@@ -1,0 +1,79 @@
+// Target example: custom AD primitives via smooth_primitive
+//
+// Source: dx-03/src/test/resources/programs/smooth_primitive.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX allows users to define new differentiable operations at compile time.
+// A `smooth_primitive` declaration tells the AD system:
+// "this function is differentiable — discover its backward rule automatically
+// by symbolically differentiating its body."
+//
+// No decorator, no framework registration — just a declaration.
+
+// ── 1-param smooth primitive: square ──
+// square(x) = x^2  →  d/dx = 2x (auto-discovered)
+
+smooth_primitive square(x: Float) -> Float:
+    x * x
+.
+
+val g1 = grad((x) => square(x), 3.0)
+print(g1)    // 6.0
+
+// ── 1-param smooth primitive: cube ──
+// cube(x) = x^3  →  d/dx = 3x^2 (auto-discovered)
+
+smooth_primitive cube(x: Float) -> Float:
+    x * x * x
+.
+
+val g2 = grad((x) => cube(x), 2.0)
+print(g2)    // 12.0
+
+// ── 2-param smooth primitive: weighted_sum ──
+// weighted_sum(a, b) = 3a + 2b  →  da = 3, db = 2
+
+type Pair:
+    a: Float
+    b: Float
+.
+
+smooth_primitive weighted_sum(a: Float, b: Float) -> Float:
+    3.0 * a + 2.0 * b
+.
+
+val gp = grad((p) => weighted_sum(p'a, p'b), Pair(1.0, 1.0))
+print(gp'a)    // 3.0
+print(gp'b)    // 2.0
+
+// ── Composable: smooth primitives in larger expressions ──
+
+fun loss(x: Float) -> Float !smooth:
+    square(x) + cube(x)
+.
+
+val g3 = grad(loss, 2.0)
+print(g3)    // 16.0  (d/dx x^2 + x^3 at x=2 = 4 + 12)
+
+// ── Plain calls: no tape, just computation ──
+
+val v = square(5.0)
+print(v)    // 25.0
+
+// Key design points:
+//
+// 1. COMPILE-TIME DISCOVERY. The compiler symbolically differentiates
+//    the body of a smooth_primitive to generate the backward rule.
+//    No runtime tracing needed for these operations.
+//
+// 2. COMPOSABLE. smooth_primitives compose with the smooth effect.
+//    When used inside a grad() call, they participate in the tape.
+//    When called outside grad(), they are just normal functions.
+//
+// 3. NO REGISTRATION. Unlike PyTorch's custom_vjp or JAX's
+//    jax.custom_jvp, there is no decorator or framework API.
+//    The language knows the function is differentiable.
+//
+// 4. FUTURE DIRECTION. This is part of the compile-time provider model:
+//    smooth_primitive is a compile-time extension point, similar to how
+//    schema providers extend the type system at compile time.

@@ -1,0 +1,87 @@
+// Target example: full smooth handler with rich grad surface
+//
+// Source: dx-03/src/test/resources/programs/dx_grad_full.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// This demo shows the complete dx-level grad() implementation:
+// a handle...with block that intercepts ALL smooth operations
+// and routes them through tape-based reverse-mode AD.
+//
+// It proves that grad() is a dx function, not a compiler builtin.
+
+// ── grad() as a dx function ──
+// The smooth effect provides: add, sub, mul, div, pow, neg,
+// exp, log, sin, cos, sqrt, tanh, abs, matmul, relu, softmax, neg_log
+
+fun grad(f: (T) -> Float !smooth, params: T) -> T:
+    val tape = new_tape()
+    val wrapped = wrap_param(tape, params)
+    val result = handle f(wrapped) with:
+        smooth'add(a, b) -> resume(tape_add(a, b))
+        smooth'sub(a, b) -> resume(tape_sub(a, b))
+        smooth'mul(a, b) -> resume(tape_mul(a, b))
+        smooth'div(a, b) -> resume(tape_div(a, b))
+        smooth'pow(a, b) -> resume(tape_pow(a, b))
+        smooth'neg(a)    -> resume(tape_neg(a))
+        smooth'exp(a)    -> resume(tape_exp(a))
+        smooth'log(a)    -> resume(tape_log(a))
+        smooth'sin(a)    -> resume(tape_sin(a))
+        smooth'cos(a)    -> resume(tape_cos(a))
+        smooth'sqrt(a)   -> resume(tape_sqrt(a))
+        smooth'tanh(a)   -> resume(tape_tanh(a))
+        smooth'abs(a)    -> resume(tape_abs(a))
+        smooth'matmul(w, x) -> resume(tape_mat_vec_mul(w, x))
+        smooth'relu(v)      -> resume(tape_relu(v))
+        smooth'softmax(v)   -> resume(tape_softmax(v))
+        smooth'neg_log(v, idx) -> resume(tape_neg_log(v, idx))
+    .
+    tape_backward(tape, result)
+    unwrap_grad(tape, wrapped)
+.
+
+// ── Scalar tests via d/d operator syntax ──
+
+// Polynomial: d(3x^2 + 2x - 1)/dx at x=2 = 14
+val x1 = 2.0
+val g1 = d (3.0 * x1 * x1 + 2.0 * x1 - 1.0) / d x1
+print(g1)    // 14.0
+
+// exp: d(exp(x))/dx at x=1 = e ≈ 2.718
+val g2 = d exp(1.0) / d x2 where val x2 = 1.0
+print(g2)    // 2.718...
+
+// sin: d(sin(x))/dx at x=0 = cos(0) = 1
+val g3 = d sin(0.0) / d x3 where val x3 = 0.0
+print(g3)    // 1.0
+
+// composition: d(exp(x^2))/dx at x=1 = 2*e ≈ 5.436
+val x7 = 1.0
+val g7 = d exp(x7 * x7) / d x7
+print(g7)    // 5.436...
+
+// ── Record tests: multi-field gradient ──
+
+type Pair:
+    a: Float
+    b: Float
+.
+
+// d(3a + 2b)/da = 3, d(3a + 2b)/db = 2
+val g8 = grad((p) => 3.0 * p'a + 2.0 * p'b, Pair(1.0, 1.0))
+print(g8'a)    // 3.0
+print(g8'b)    // 2.0
+
+// Key design points:
+//
+// 1. The handler intercepts EVERY smooth operation — arithmetic, math
+//    functions, matmul, activation functions, loss functions.
+//
+// 2. The model function is pure. It never knows it's being differentiated.
+//
+// 3. The d/d syntax is sugar for grad(). It works on both scalars and records.
+//
+// 4. This is the same mechanism that enables custom gradient handlers
+//    (traced_grad, clipped_grad, scaled_grad) — just swap the handler.
+//
+// 5. The handler list is the complete AD surface. Adding a new differentiable
+//    operation means adding one handler case, not changing the compiler.

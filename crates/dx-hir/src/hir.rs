@@ -1,4 +1,4 @@
-use dx_parser::{ImportPyDecl, TypeExpr};
+use dx_parser::{ImportPyDecl, SchemaDecl, TypeExpr};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
@@ -7,6 +7,7 @@ pub struct Module {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    Schema(SchemaDecl),
     ImportPy(ImportPyDecl),
     Function(Function),
     Statement(Stmt),

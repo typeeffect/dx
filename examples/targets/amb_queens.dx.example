@@ -1,0 +1,75 @@
+-- Semantic target recovered from:
+-- /home/frapas/dx-lang/dx-03/src/test/resources/programs/amb_queens.dx
+--
+-- This keeps the search semantics visible without freezing final collection syntax.
+
+effect Amb:
+    choose(limit: Int) -> Int
+.
+
+fun safe(placed: List[Int], row: Int, col: Int) -> Bool:
+    if placed'len() == 0:
+        true
+    else:
+        var ok = true
+        var i = 0
+
+        while i < placed'len():
+            val existing = placed'get(i)
+
+            if existing == col:
+                ok = false
+            .
+
+            if existing - col == row - i:
+                ok = false
+            .
+
+            if col - existing == row - i:
+                ok = false
+            .
+
+            i = i + 1
+        .
+
+        ok
+    .
+.
+
+fun place_row(size: Int, row: Int, placed: List[Int]) -> List[List[Int]] !Amb:
+    if row >= size:
+        [placed]
+    else:
+        val col = choose(size)
+
+        if safe(placed, row, col):
+            place_row(size, row + 1, placed'push(col))
+        else:
+            []
+        .
+    .
+.
+
+fun solve_queens(size: Int) -> List[List[Int]] !Amb:
+    handle place_row(size, 0, []) with
+        choose(limit):
+            val all = [] as List[List[Int]]
+            var candidate = 0
+
+            while candidate < limit:
+                all = list_concat(all, resume(candidate))
+                candidate = candidate + 1
+            .
+
+            all
+    .
+.
+
+fun main() -> Unit !io:
+    val solutions = solve_queens(4)
+    print("solutions=" + solutions'len()'str())
+.
+
+-- Target claim:
+-- nondeterministic search remains a first-class DX use-case
+-- and larger search problems justify selective CPS for `multi` handlers

@@ -1,4 +1,5 @@
-use crate::{hir, typed, types::Type};
+use crate::{hir, schema::BoundSchemaCatalog, typed, types::Type};
+use dx_schema::{DxSchemaType, SchemaArtifact, SchemaField};
 use dx_parser::BinOp;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -15,11 +16,38 @@ pub struct TypeCheckReport {
 }
 
 pub fn typecheck_module(module: &hir::Module) -> TypeCheckReport {
-    let globals = collect_globals(module);
+    typecheck_module_with_known_schema_rows(module, HashSet::new(), HashMap::new())
+}
+
+pub fn typecheck_module_with_bound_schemas(
+    module: &hir::Module,
+    catalog: &BoundSchemaCatalog,
+) -> TypeCheckReport {
+    let known_schema_rows = catalog
+        .bindings
+        .iter()
+        .map(|binding| binding.schema.clone())
+        .collect();
+    let bound_schemas = catalog
+        .bindings
+        .iter()
+        .map(|binding| (binding.schema.clone(), binding.artifact.clone()))
+        .collect();
+    typecheck_module_with_known_schema_rows(module, known_schema_rows, bound_schemas)
+}
+
+fn typecheck_module_with_known_schema_rows(
+    module: &hir::Module,
+    known_schema_rows: HashSet<String>,
+    bound_schemas: HashMap<String, SchemaArtifact>,
+) -> TypeCheckReport {
+    let globals = collect_globals(module, &known_schema_rows);
     let imported_py = collect_imported_py_names(module);
     let mut checker = Checker {
         globals,
         imported_py,
+        known_schema_rows,
+        bound_schemas,
         diagnostics: Vec::new(),
     };
     let module = crate::capture::annotate_module_captures(checker.typecheck_module(module));
@@ -76,6 +104,8 @@ impl Scope {
 struct Checker {
     globals: HashMap<String, Binding>,
     imported_py: HashSet<String>,
+    known_schema_rows: HashSet<String>,
+    bound_schemas: HashMap<String, SchemaArtifact>,
     diagnostics: Vec<TypeCheckDiagnostic>,
 }
 
@@ -92,6 +122,7 @@ impl Checker {
 
     fn typecheck_item(&mut self, item: &hir::Item) -> typed::Item {
         match item {
+            hir::Item::Schema(schema) => typed::Item::Schema(schema.clone()),
             hir::Item::ImportPy(import) => typed::Item::ImportPy(import.clone()),
             hir::Item::Function(function) => typed::Item::Function(self.typecheck_function(function)),
             hir::Item::Statement(stmt) => {
@@ -115,7 +146,7 @@ impl Checker {
             .iter()
             .map(|param| typed::Param {
                 name: param.name.clone(),
-                ty: Type::from_type_expr(&param.ty),
+                ty: Type::from_type_expr_with_schema_rows(&param.ty, &self.known_schema_rows),
             })
             .collect();
 
@@ -131,7 +162,10 @@ impl Checker {
         }
 
         let body = self.typecheck_block(&function.name, &function.body, &mut scope);
-        let declared_return = function.return_type.as_ref().map(Type::from_type_expr);
+        let declared_return = function
+            .return_type
+            .as_ref()
+            .map(|ty| Type::from_type_expr_with_schema_rows(ty, &self.known_schema_rows));
         if let Some(expected) = &declared_return {
             if !compatible_types(expected, &body.ty) {
                 self.diag(
@@ -262,6 +296,9 @@ impl Checker {
                 let base = Box::new(self.typecheck_expr(function_name, base, scope));
                 let ty = match base.ty {
                     Type::PyObj => Type::PyObj,
+                    Type::SchemaRow(ref schema) => self
+                        .schema_row_field_type(function_name, schema, name)
+                        .unwrap_or(Type::Unknown),
                     _ => Type::Unknown,
                 };
                 typed::Expr {
@@ -312,7 +349,9 @@ impl Checker {
                         let ty = param
                             .ty
                             .as_ref()
-                            .map(Type::from_type_expr)
+                            .map(|ty| {
+                                Type::from_type_expr_with_schema_rows(ty, &self.known_schema_rows)
+                            })
                             .unwrap_or(Type::Unknown);
                         inner.define(
                             param.name.clone(),
@@ -421,6 +460,25 @@ impl Checker {
                 }
             }
         }
+    }
+
+    fn schema_row_field_type(
+        &mut self,
+        function_name: &str,
+        schema: &str,
+        field: &str,
+    ) -> Option<Type> {
+        let Some(artifact) = self.bound_schemas.get(schema) else {
+            return None;
+        };
+        let Some(schema_field) = artifact.fields.get(field) else {
+            self.diag(
+                function_name,
+                format!("unknown field `{field}` on schema row `{schema}.Row`"),
+            );
+            return None;
+        };
+        Some(type_from_schema_field(schema_field))
     }
 
     fn typecheck_closure_body(
@@ -696,10 +754,14 @@ impl Checker {
     }
 }
 
-fn collect_globals(module: &hir::Module) -> HashMap<String, Binding> {
+fn collect_globals(
+    module: &hir::Module,
+    known_schema_rows: &HashSet<String>,
+) -> HashMap<String, Binding> {
     let mut globals = HashMap::new();
     for item in &module.items {
         match item {
+            hir::Item::Schema(_) => {}
             hir::Item::ImportPy(import) => {
                 for name in &import.names {
                     globals.insert(
@@ -717,12 +779,15 @@ fn collect_globals(module: &hir::Module) -> HashMap<String, Binding> {
                 }
             }
             hir::Item::Function(function) => {
-                let params: Vec<Type> =
-                    function.params.iter().map(|param| Type::from_type_expr(&param.ty)).collect();
+                let params: Vec<Type> = function
+                    .params
+                    .iter()
+                    .map(|param| Type::from_type_expr_with_schema_rows(&param.ty, known_schema_rows))
+                    .collect();
                 let ret = function
                     .return_type
                     .as_ref()
-                    .map(Type::from_type_expr)
+                    .map(|ty| Type::from_type_expr_with_schema_rows(ty, known_schema_rows))
                     .unwrap_or(Type::Unit);
                 globals.insert(
                     function.name.clone(),
@@ -922,11 +987,27 @@ fn compatible_types(expected: &Type, actual: &Type) -> bool {
     expected == actual || expected.is_unknown() || actual.is_unknown()
 }
 
+fn type_from_schema_field(field: &SchemaField) -> Type {
+    let base = match field.ty {
+        DxSchemaType::Int => Type::Int,
+        DxSchemaType::Float => Type::Float,
+        DxSchemaType::Bool => Type::Bool,
+        DxSchemaType::Str => Type::Str,
+    };
+    if field.nullable {
+        Type::Option(Box::new(base))
+    } else {
+        base
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lower::lower_module;
+    use crate::{lower::lower_module, BoundSchemaArtifact, BoundSchemaCatalog};
     use dx_parser::{Lexer, Parser};
+    use dx_schema::{build_artifact, DxSchemaType, SchemaField, SchemaMetadata};
+    use std::collections::BTreeMap;
 
     fn check(src: &str) -> TypeCheckReport {
         let tokens = Lexer::new(src).tokenize();
@@ -934,6 +1015,61 @@ mod tests {
         let ast = parser.parse_module().expect("module should parse");
         let hir = lower_module(&ast);
         typecheck_module(&hir)
+    }
+
+    fn check_with_bound_schemas(src: &str, catalog: &BoundSchemaCatalog) -> TypeCheckReport {
+        let tokens = Lexer::new(src).tokenize();
+        let mut parser = Parser::new(tokens);
+        let ast = parser.parse_module().expect("module should parse");
+        let hir = lower_module(&ast);
+        typecheck_module_with_bound_schemas(&hir, catalog)
+    }
+
+    fn customers_catalog() -> BoundSchemaCatalog {
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            "id".to_string(),
+            SchemaField {
+                ty: DxSchemaType::Int,
+                nullable: false,
+            },
+        );
+        fields.insert(
+            "name".to_string(),
+            SchemaField {
+                ty: DxSchemaType::Str,
+                nullable: false,
+            },
+        );
+        fields.insert(
+            "email".to_string(),
+            SchemaField {
+                ty: DxSchemaType::Str,
+                nullable: true,
+            },
+        );
+        let artifact = build_artifact(
+            SchemaMetadata {
+                format_version: "0.1.0".to_string(),
+                name: "Customers".to_string(),
+                provider: "csv".to_string(),
+                source: "data/customers.csv".to_string(),
+                source_fingerprint: "sha256:source".to_string(),
+                schema_fingerprint: "sha256:schema".to_string(),
+                generated_at: "2026-03-29T10:00:00Z".to_string(),
+            },
+            fields,
+        )
+        .expect("artifact");
+
+        BoundSchemaCatalog {
+            bindings: vec![BoundSchemaArtifact {
+                schema: "Customers".to_string(),
+                artifact_path: "schemas/customers.dxschema".to_string(),
+                artifact,
+            }],
+            diagnostics: vec![],
+        }
     }
 
     #[test]
@@ -948,6 +1084,94 @@ mod tests {
             }
             other => panic!("expected function, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn schema_aware_typecheck_materializes_direct_schema_row_param_and_return_types() {
+        let report = check_with_bound_schemas(
+            "fun keep(row: Customers.Row) -> Customers.Row:\n    row\n.\n",
+            &customers_catalog(),
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[0] {
+            typed::Item::Function(function) => {
+                assert_eq!(function.params[0].ty, Type::SchemaRow("Customers".to_string()));
+                assert_eq!(
+                    function.return_type,
+                    Some(Type::SchemaRow("Customers".to_string()))
+                );
+                assert_eq!(function.body.ty, Type::SchemaRow("Customers".to_string()));
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schema_aware_typecheck_materializes_direct_schema_row_lambda_param_type() {
+        let report = check_with_bound_schemas(
+            "fun run() -> Unit:\n    val f = (row: Customers.Row) => row\n    ()\n.\n",
+            &customers_catalog(),
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[0] {
+            typed::Item::Function(function) => match &function.body.stmts[0] {
+                typed::Stmt::Let { value, .. } => match &value.ty {
+                    Type::Function { params, ret, .. } => {
+                        assert_eq!(params, &vec![Type::SchemaRow("Customers".to_string())]);
+                        assert_eq!(ret.as_ref(), &Type::SchemaRow("Customers".to_string()));
+                    }
+                    other => panic!("expected function type, got {other:?}"),
+                },
+                other => panic!("expected let, got {other:?}"),
+            },
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schema_aware_typecheck_types_row_member_access_from_bound_fields() {
+        let report = check_with_bound_schemas(
+            "fun customer_name(row: Customers.Row) -> Str:\n    row'name\n.\n",
+            &customers_catalog(),
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[0] {
+            typed::Item::Function(function) => {
+                assert_eq!(function.body.ty, Type::Str);
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schema_aware_typecheck_marks_nullable_row_member_access_as_option_named_type() {
+        let report = check_with_bound_schemas(
+            "fun customer_email(row: Customers.Row) -> Option(Str):\n    row'email\n.\n",
+            &customers_catalog(),
+        );
+        assert!(report.diagnostics.is_empty());
+        match &report.module.items[0] {
+            typed::Item::Function(function) => {
+                assert_eq!(function.body.ty, Type::Option(Box::new(Type::Str)));
+                assert_eq!(
+                    function.return_type,
+                    Some(Type::Option(Box::new(Type::Str)))
+                );
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schema_aware_typecheck_reports_unknown_row_field() {
+        let report = check_with_bound_schemas(
+            "fun bad(row: Customers.Row) -> Unit:\n    row'missing\n    ()\n.\n",
+            &customers_catalog(),
+        );
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("unknown field `missing` on schema row `Customers.Row`")));
     }
 
     #[test]

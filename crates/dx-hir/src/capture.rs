@@ -90,6 +90,7 @@ fn collect_global_bindings(module: &typed::Module) -> HashMap<String, CaptureBin
     let mut globals = HashMap::new();
     for item in &module.items {
         match item {
+            typed::Item::Schema(_) => {}
             typed::Item::ImportPy(import) => {
                 for name in &import.names {
                     globals.insert(
@@ -129,6 +130,7 @@ fn annotate_item(
     globals: &HashMap<String, CaptureBinding>,
 ) -> typed::Item {
     match item {
+        typed::Item::Schema(schema) => typed::Item::Schema(schema),
         typed::Item::ImportPy(import) => typed::Item::ImportPy(import),
         typed::Item::Function(function) => {
             let mut scope = CaptureScope::new();

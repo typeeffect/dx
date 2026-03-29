@@ -28,6 +28,28 @@ From `dx-03`:
 
 This is a strong idea and should be preserved conceptually.
 
+## AD Primitive Recovery Direction
+
+One specific `dx-03` feature deserves recovery beyond the generic "AD via
+effects" thesis:
+
+- `smooth_primitive`
+
+What matters is not the exact old syntax.
+What matters is that `dx-03` already had a narrow compile-time facility for:
+
+- declaring new differentiable primitives
+- generating derivative rules automatically for a limited expression subset
+- supplying explicit fused backward rules where needed
+
+`dx-04` should recover this through the same compile-time provider machinery
+used for schema, not as an isolated special-case feature.
+
+Reference:
+
+- `docs/DX_COMPILETIME_PROVIDERS_PLAN.md`
+- `docs/DX_AD_PRIMITIVE_PROVIDER_PLAN.md`
+
 ## 2. Probabilistic Programming via Effects
 
 This should also be preserved.

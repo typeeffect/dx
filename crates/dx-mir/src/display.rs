@@ -254,6 +254,8 @@ pub fn render_type(ty: &Type) -> String {
         Type::Str => "Str".to_string(),
         Type::Unit => "Unit".to_string(),
         Type::PyObj => "PyObj".to_string(),
+        Type::SchemaRow(schema) => format!("{schema}.Row"),
+        Type::Option(inner) => format!("Option({})", render_type(inner)),
         Type::Named(name) => name.clone(),
         Type::Function {
             params,
@@ -354,6 +356,8 @@ mod tests {
         assert_eq!(render_type(&Type::Unit), "Unit");
         assert_eq!(render_type(&Type::PyObj), "PyObj");
         assert_eq!(render_type(&Type::Unknown), "?");
+        assert_eq!(render_type(&Type::SchemaRow("Customers".into())), "Customers.Row");
+        assert_eq!(render_type(&Type::Option(Box::new(Type::Str))), "Option(Str)");
         assert_eq!(render_type(&Type::Named("Foo".into())), "Foo");
     }
 

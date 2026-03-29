@@ -14,6 +14,12 @@ It is a strategic and technical baseline for:
 - killer app
 - near-term roadmap
 
+For the explicit long-term platform layering beyond the current implementation
+milestones, see:
+
+- `docs/DX_LONG_TERM_ROADMAP.md`
+- `docs/DX_SMALL_CORE_RULES.md`
+
 ## Thesis
 
 `dx` is not "Python with a few fixes".
@@ -62,6 +68,10 @@ That direction should eventually include explicit compile-time schema providers 
 - Strong interop with Python where useful
 - Result-first error handling with explicit `!throw` at foreign/runtime boundaries
 - Explicit schema acquisition for typed external data shapes, not implicit compile-time data loading
+
+Reference:
+
+- `docs/DX_SMALL_CORE_RULES.md`
 
 ### What `dx` keeps from Python
 
@@ -554,9 +564,11 @@ This means `dx` should be designed around:
 
 ### Initial direction
 
-- value types use value/copy semantics
-- heap objects are reference-counted by default
-- non-atomic RC unless cross-thread/shared semantics require otherwise
+- plain values use stack / move semantics
+- temporary bulk lifetimes should use regions / arenas
+- long-lived shared storage should use explicit shared buffers
+- reference counting may back shared buffers where deterministic shared
+  ownership is needed
 
 ### Important constraints
 
@@ -568,7 +580,25 @@ The design must leave room for:
 - RC elimination
 - escape analysis
 - arenas/regions
+- shared-buffer handles
 - future lower-level ownership models
+
+### Preferred memory architecture
+
+The preferred long-term architecture is:
+
+1. plain values
+2. regions / arenas for temporaries
+3. explicit shared storage for long-lived data
+
+This is the best fit for:
+
+- deterministic runtime costs
+- data-heavy native execution
+- ML / inference workloads with many temporary allocations
+
+It should be safer than C or Nim in normal code, while staying simpler than a
+Rust-style general borrow checker.
 
 ### Systems-language compatibility rule
 
@@ -581,6 +611,11 @@ That means:
 - no pervasive hidden allocations
 - future `unsafe` model possible
 - future C ABI and FFI stability possible
+
+Reference direction:
+
+- `docs/DX_MEMORY_MODEL_PLAN.md`
+- `docs/DX_MEMORY_MODEL_IMPLEMENTATION_PLAN.md`
 
 ## Python Interoperability
 
@@ -841,6 +876,10 @@ Possible future expansion:
 - systems-grade runtime and library capabilities
 
 ## Growth Path
+
+The detailed long-term layering is documented in:
+
+- `docs/DX_LONG_TERM_ROADMAP.md`
 
 The strategic goal is not to keep `dx` permanently narrow.
 

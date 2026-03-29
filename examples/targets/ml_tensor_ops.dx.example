@@ -1,0 +1,66 @@
+// Target example: 2D matrix / tensor primitives for ML
+//
+// Source: dx-03/src/test/resources/programs/transformer_ops.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX needs a core set of tensor operations for ML workloads.
+// These primitives sit below the model layer and above the memory layer.
+
+// ── Matrix multiplication via `o` operator ──
+
+val A = random_mat(3, 4, seed: 1, scale: 1.0)
+val B = random_mat(4, 2, seed: 2, scale: 1.0)
+val C = A o B
+assert(C'rows == 3)
+assert(C'cols == 2)
+
+// ── Row broadcasting ──
+
+val X = random_mat(3, 4, seed: 20, scale: 1.0)
+val v = random_vec(4, seed: 30, scale: 1.0)
+
+val added = row_add(X, v)       // add v to each row of X
+val scaled = row_mul(X, v)      // element-wise multiply each row by v
+assert(added'rows == 3)
+assert(scaled'cols == 4)
+
+// ── Row reductions ──
+
+val means = row_mean(X)         // mean of each row → vec[3]
+val sums = row_sum(X)           // sum of each row → vec[3]
+assert(means'len == 3)
+
+// ── Embedding lookup ──
+// Select rows by index — the fundamental operation for token embeddings
+
+val vocab_table = random_mat(10, 4, seed: 40, scale: 1.0)
+val tokens = [0, 3, 7]
+val embedded = mat_rows(vocab_table, tokens)
+assert(embedded'rows == 3)
+assert(embedded'cols == 4)
+
+// ── Softmax over rows ──
+
+val logits = random_mat(3, 5, seed: 50, scale: 1.0)
+val probs = mat_map_rows(logits, (row) => softmax(row))
+// Each row should sum to ~1.0
+assert(row_sum(probs)[0] > 0.999)
+
+// ── Causal mask ──
+
+val sq = random_mat(4, 4, seed: 60, scale: 1.0)
+val masked = mask_upper_triangle(sq, -999999.0)
+// M[0,1] should be masked (above diagonal)
+assert(masked'get(0, 1) < -999998.0)
+
+// ── Transpose ──
+
+val T = transpose(X)
+assert(T'rows == X'cols)
+assert(T'cols == X'rows)
+
+// Key design point: these are the primitive operations needed to build
+// transformer layers. They compose with DX's effect system — when run
+// under a smooth handler, they participate in automatic differentiation.
+// The `o` operator is overloaded for mat×mat, mat×vec, and eventually
+// tensor×tensor operations.

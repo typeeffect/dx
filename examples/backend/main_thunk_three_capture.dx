@@ -1,0 +1,8 @@
+fun main() -> Int:
+    val a = 10
+    val b = 20
+    val c = 12
+    val result = a + b + c
+    val t = lazy result
+    t()
+.

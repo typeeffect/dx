@@ -64,6 +64,8 @@ Within that broader backend set, the current executable-entry fixtures are:
 - `main_returns_zero.dx`
 - `main_arithmetic.dx`
 - `main_closure_call_int.dx`
+- `main_closure_call_multi_capture.dx`
+- `main_closure_call_nested.dx`
 - `main_closure_call_subtract.dx`
 - `main_closure_call_two_args.dx`
 - `main_thunk_arithmetic.dx`
@@ -74,6 +76,8 @@ All executable-entry demos are now runnable with the current runtime stub:
 - `main_returns_zero.dx` (exit code 0)
 - `main_arithmetic.dx` (exit code 42)
 - `main_closure_call_int.dx` (exit code 42)
+- `main_closure_call_multi_capture.dx` (exit code 42)
+- `main_closure_call_nested.dx` (exit code 42)
 - `main_closure_call_subtract.dx` (exit code 42)
 - `main_closure_call_two_args.dx` (exit code 42)
 - `main_thunk_arithmetic.dx` (exit code 42)
@@ -125,6 +129,20 @@ cargo run -q -p dx-llvm-ir --bin dx-plan-exec -- examples/backend/closure_call_i
 ```bash
 cargo run -q -p dx-llvm-ir --bin dx-run-exec -- --json examples/backend/main_arithmetic.dx
 ```
+
+### Runtime Stub Archive Freshness
+
+The native build/run paths link against the `dx-runtime-stub` archive. If
+runtime semantics change (new stub functions, ABI changes, dispatch fixes), the
+archive must be rebuilt before running `dx-build-exec` or `dx-run-exec`:
+
+```bash
+scripts/build_runtime_stub_archive.sh
+```
+
+A stale or invalid archive causes a linker failure at build time. Missing
+symbols from a stale archive are the most common source of false negative
+execution results.
 
 ### Prove The Runnable Executable-Entry Subset
 
@@ -219,6 +237,8 @@ All executable-entry demos are now runnable:
 - `main_returns_zero.dx` (exit code 0)
 - `main_arithmetic.dx` (exit code 42)
 - `main_closure_call_int.dx` (exit code 42)
+- `main_closure_call_multi_capture.dx` (exit code 42)
+- `main_closure_call_nested.dx` (exit code 42)
 - `main_closure_call_subtract.dx` (exit code 42)
 - `main_closure_call_two_args.dx` (exit code 42)
 - `main_thunk_arithmetic.dx` (exit code 42)

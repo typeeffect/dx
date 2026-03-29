@@ -1,0 +1,61 @@
+// Target example: causal attention forward pass
+//
+// Source: dx-03/src/test/resources/programs/attention_forward.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// This is the core computation of a transformer decoder layer.
+// DX should express this as naturally as Python/JAX, but with
+// effect-based AD and typed tensor operations.
+
+fun softmax_2d(x: Mat) -> Mat:
+    mat_map_rows(x, (row) => softmax(row))
+.
+
+fun causal_attention(Q: Mat, K: Mat, V: Mat) -> Mat:
+    val d_k = Q'cols
+    val scale = 1.0 / sqrt(to_float(d_k))
+    val scores = mat_scale(scale, Q o transpose(K))
+    val masked = mask_upper_triangle(scores, -999999.0)
+    val attn = softmax_2d(masked)
+    attn o V
+.
+
+// Small test: seq=4, d_model=3
+val seq = 4
+val d_model = 3
+
+val Q = random_mat(seq, d_model, seed: 1, scale: 0.5)
+val K = random_mat(seq, d_model, seed: 2, scale: 0.5)
+val V = random_mat(seq, d_model, seed: 3, scale: 0.5)
+
+val out = causal_attention(Q, K, V)
+assert(out'rows == seq)
+assert(out'cols == d_model)
+
+// First row of attention should only attend to itself (causal mask)
+// so out[0,:] should be approximately V[0,:]
+val diff = out'get(0, 0) - V'get(0, 0)
+assert(diff > -0.01)
+assert(diff < 0.01)
+
+// ── Cross-entropy loss ──
+
+fun cross_entropy_seq(logits_mat: Mat, targets: List(Int)) -> Float:
+    val probs = softmax_2d(logits_mat)
+    var total = 0.0
+    for i in 0..targets'len - 1:
+        total = total - ln(probs'get(i, targets[i]))
+    .
+    total / to_float(targets'len)
+.
+
+val test_logits = random_mat(4, 10, seed: 20, scale: 1.0)
+val test_targets = [3, 7, 1, 5]
+val loss = cross_entropy_seq(test_logits, test_targets)
+// Cross-entropy should be positive for random logits
+assert(loss > 0.0)
+
+// Key design point: causal_attention is a pure function. Under a smooth
+// handler, every operation (matmul, softmax, mask) is intercepted for AD.
+// This means grad(loss, params) "just works" on the entire forward pass —
+// no manual backward implementation needed.

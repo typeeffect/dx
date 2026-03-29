@@ -7,10 +7,18 @@ Current focus:
 - small core language
 - explicit effects
 - Python interop as a foreign boundary
-- future compile-time schema providers for typed data sources
-- executable-subset expansion beyond the first native baseline
-- runtime-semantics expansion beyond the current stub
+- compile-time providers moving from schema/artifact tooling toward broader language integration
+- region-based memory model moving from runtime crate slices toward language/runtime integration
+- keeping the closed backend/toolchain baseline stable
+- keeping the strategic target examples package aligned with the language direction
 - post-bootstrap roadmap after backend/toolchain closure
+- keeping the core language small and regular while pushing capability into providers and layers
+- long-term platform direction:
+  - LLM-first native core
+  - typed data
+  - ML/inference
+  - probabilistic semantics
+  - progressive Python displacement
 
 ## Layout
 
@@ -40,8 +48,9 @@ The current implementation target is:
 
 1. keep the frontend/type/effect core stable
 2. keep the backend/toolchain baseline stable
-3. expand the runnable executable subset around `dx-runtime-stub`
-4. prepare the next language-facing feature wave after A/B/C
+3. move schema-provider tooling toward language integration
+4. move the region/shared-buffer memory model toward broader integration
+5. keep the recovered target examples package coherent with the roadmap
 
 ## First Milestone
 
@@ -61,9 +70,17 @@ Executable backend demo inputs:
 
 Primary design docs:
 
+- `docs/DX_SMALL_CORE_RULES.md`
+- `docs/DX_PROVIDER_CONSTRAINTS.md`
+- `docs/DX_COMPILETIME_PROVIDERS_PLAN.md`
+- `docs/DX_AD_PRIMITIVE_PROVIDER_PLAN.md`
 - `docs/PY_INTEROP_ARCHITECTURE.md`
 - `docs/DX_SCHEMA_PROVIDER_PLAN.md`
+- `docs/DX_MEMORY_MODEL_PLAN.md`
+- `docs/DX_MEMORY_MODEL_IMPLEMENTATION_PLAN.md`
+- `docs/DX_LONG_TERM_ROADMAP.md`
 - `docs/DX_AD_PPL_DIRECTION.md`
+- `docs/DX_TARGET_EXAMPLES_RECOVERY.md`
 - `docs/DX_IMPLEMENTATION_ROADMAP.md`
 - `docs/DX_REAL_LLVM_BACKEND_PLAN.md`
 - `docs/DX_LLVM_TOOLCHAIN_PLAN.md`

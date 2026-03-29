@@ -235,7 +235,13 @@ fn closure_type_abi(ty: &Type) -> ClosureAbiType {
         Type::Float => ClosureAbiType::F64,
         Type::Bool => ClosureAbiType::I1,
         Type::Unit => ClosureAbiType::Ptr,
-        Type::Str | Type::PyObj | Type::Named(_) | Type::Function { .. } | Type::Unknown => {
+        Type::Str
+        | Type::PyObj
+        | Type::SchemaRow(_)
+        | Type::Option(_)
+        | Type::Named(_)
+        | Type::Function { .. }
+        | Type::Unknown => {
             ClosureAbiType::Ptr
         }
     }
@@ -247,7 +253,13 @@ fn closure_return_abi(ty: &Type) -> ClosureReturnAbi {
         Type::Float => ClosureReturnAbi::F64,
         Type::Bool => ClosureReturnAbi::I1,
         Type::Unit => ClosureReturnAbi::Void,
-        Type::Str | Type::PyObj | Type::Named(_) | Type::Function { .. } | Type::Unknown => {
+        Type::Str
+        | Type::PyObj
+        | Type::SchemaRow(_)
+        | Type::Option(_)
+        | Type::Named(_)
+        | Type::Function { .. }
+        | Type::Unknown => {
             ClosureReturnAbi::Ptr
         }
     }

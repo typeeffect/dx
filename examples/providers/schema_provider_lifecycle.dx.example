@@ -1,0 +1,60 @@
+// Schema provider lifecycle example
+//
+// Status: schema declarations parse; artifact tooling works; compiler integration not yet
+//
+// This example shows the full schema provider lifecycle:
+// declare → refresh → lock → build → use
+
+// ── Step 1: Declare ──
+// The source file names the schema and its provider.
+
+schema Customers = csv.schema("data/customers.csv")
+
+// ── Step 2: Lock (optional explicit artifact path) ──
+// `using "..."` pins the artifact location. Without it, the compiler
+// uses a default path derived from the schema name.
+
+schema Sales = parquet.schema("data/sales.parquet") using "schemas/sales.dxschema"
+
+// ── Step 3: Refresh (explicit, not part of normal build) ──
+// `refresh` marks this schema for re-acquisition.
+// Run `dx schema refresh` to query the datasource and update the artifact.
+
+schema Events = parquet.schema("data/events.parquet") refresh
+
+// ── Step 4: Use ──
+// After refresh, the locked artifact gives typed field access.
+// Normal builds read the artifact — never the datasource.
+// Nullable fields are typed as Option(T) in the Row type:
+//   email: Str?  in artifact  →  customer'email : Option(Str) in code
+
+fun active_customers(customers: List(Customers.Row), events: List(Events.Row)) -> List(Customers.Row):
+    val active_ids = events
+      where: it'event_type == "login"
+      select: it'customer_id
+    customers
+      where: it'id in active_ids
+.
+
+// ── Lifecycle summary ──
+//
+// Developer workflow:
+//   1. Write `schema X = provider.schema("source")`
+//   2. Run `dx schema refresh input.dx` → generates/updates .dxschema artifact
+//   3. Review artifact diff in version control
+//   4. Commit the artifact
+//   5. Normal build reads the locked artifact (offline, deterministic)
+//
+// Default artifact path:
+//   Without `using "..."`, the artifact path is derived from the schema name:
+//   schema Customers = csv.schema("data/customers.csv")
+//   → default artifact: schemas/customers.dxschema
+//
+// Current: `dx schema refresh` is the user-facing command.
+// Internal: `dx-schema-refresh` is the low-level bootstrap slice underneath.
+//
+// When the datasource changes:
+//   1. Run refresh again
+//   2. Review the diff (new columns? type changes? removed fields?)
+//   3. Fix code if needed
+//   4. Commit

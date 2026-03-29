@@ -165,7 +165,13 @@ fn closure_hook_for_invocation(invocation: &LoweredClosureInvocation) -> Closure
         Type::Float => ClosureReturnAbi::F64,
         Type::Bool => ClosureReturnAbi::I1,
         Type::Unit => ClosureReturnAbi::Void,
-        Type::Str | Type::PyObj | Type::Named(_) | Type::Function { .. } | Type::Unknown => {
+        Type::Str
+        | Type::PyObj
+        | Type::SchemaRow(_)
+        | Type::Option(_)
+        | Type::Named(_)
+        | Type::Function { .. }
+        | Type::Unknown => {
             ClosureReturnAbi::Ptr
         }
     };

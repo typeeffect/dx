@@ -1,0 +1,60 @@
+// Schema source example: mixed CSV + Parquet analysis
+//
+// This example shows a multi-schema pipeline combining customer data (CSV)
+// with sales data (Parquet). Both schemas are locked via .dxschema artifacts.
+//
+// Parser-stable: the `schema` declarations parse in the current dx-parser.
+// The pipeline syntax (where/group_by/select/join) is still a semantic target.
+
+schema Customers = csv.schema("data/customers.csv") using "schemas/customers.dxschema"
+schema Sales = parquet.schema("data/sales.parquet") using "schemas/sales.dxschema"
+
+// ── Typed analysis over locked schemas ──
+
+fun top_customers_by_revenue(
+    customers: List(Customers.Row),
+    sales: List(Sales.Row),
+) -> Table:
+    sales
+      join: customers on: sales'region == customers'region
+      group_by: customers'name
+      select:
+        name: customers'name
+        region: customers'region
+        total_revenue: sales'revenue'sum
+        order_count: sales'count
+      where: total_revenue > 1000.0
+      order_by: total_revenue desc
+.
+
+fun revenue_summary(sales: List(Sales.Row)) -> Table:
+    sales
+      group_by: it'product_category
+      select:
+        category: it'product_category
+        revenue: it'revenue'sum
+        avg_discount: it'discount'mean
+        items_sold: it'quantity'sum
+.
+
+// ── Entry point ──
+
+fun main() -> Unit !io:
+    val customers = load(Customers, "data/customers.csv")
+    val sales = load(Sales, "data/sales.parquet")
+
+    val top = top_customers_by_revenue(customers, sales)
+    print("top customers:")
+    print(top)
+
+    val summary = revenue_summary(sales)
+    print("revenue by category:")
+    print(summary)
+.
+
+// Key design points:
+//
+// 1. Both schemas use `using "..."` — locked artifacts, offline builds.
+// 2. CSV and Parquet schemas compose in the same pipeline.
+// 3. Nullable fields (discount) use Option(Float) — mean handles None.
+// 4. Field access is compile-time checked against both schemas.

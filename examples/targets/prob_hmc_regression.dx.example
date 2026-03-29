@@ -1,0 +1,139 @@
+// Target example: Hamiltonian Monte Carlo — three effects interacting
+//
+// Source: dx-03/src/test/resources/programs/hmc.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// This is the most advanced demo in the target package: it combines
+// three algebraic effects in a single program:
+//   - smooth (AD) — for gradients of the log-posterior
+//   - random      — for momentum sampling + accept/reject
+//   - state       — for the MCMC chain
+//
+// Model: Bayesian linear regression
+//   y_i ~ Normal(a * x_i + b, sigma=1)
+//   Prior: a ~ Normal(0, 10), b ~ Normal(0, 10)
+
+// ── Synthetic data: y = 2.5*x + 1.0 + noise ──
+
+val xs = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5,
+          5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5]
+val ys = [1.0, 2.3, 3.5, 4.8, 6.0, 7.3, 8.5, 9.8, 11.0, 12.3,
+          13.5, 14.8, 16.0, 17.3, 18.5, 19.8, 21.0, 22.3, 23.5, 24.8]
+
+// ── Log-posterior ──
+
+fun log_posterior(a: Float, b: Float) -> Float:
+    var ll = 0.0
+    for i in 0..xs'len - 1:
+        val pred = a * xs[i] + b
+        val residual = ys[i] - pred
+        ll = ll - 0.5 * residual * residual
+    .
+    // Log-prior: Normal(0, 10)
+    val lp = -0.5 * (a / 10.0) * (a / 10.0) - 0.5 * (b / 10.0) * (b / 10.0)
+    ll + lp
+.
+
+// ── Gradient via d/d operator (uses smooth effect under the hood) ──
+
+fun grad_a(a: Float, b: Float) -> Float:
+    d log_posterior(a, b) / d a
+.
+
+fun grad_b(a: Float, b: Float) -> Float:
+    d log_posterior(a, b) / d b
+.
+
+// ── Leapfrog integrator ──
+
+fun leapfrog(a: Float, b: Float, epsilon: Float, n_steps: Int) -> (Float, Float, Float, Float):
+    var pa = random_normal()    // momentum (random effect)
+    var pb = random_normal()
+    var qa = a
+    var qb = b
+
+    // Half step for momentum
+    pa = pa + epsilon * 0.5 * grad_a(qa, qb)
+    pb = pb + epsilon * 0.5 * grad_b(qa, qb)
+
+    for step in 0..n_steps - 1:
+        qa = qa + epsilon * pa
+        qb = qb + epsilon * pb
+        if step < n_steps - 1:
+            pa = pa + epsilon * grad_a(qa, qb)
+            pb = pb + epsilon * grad_b(qa, qb)
+        .
+    .
+
+    // Half step for momentum
+    pa = pa + epsilon * 0.5 * grad_a(qa, qb)
+    pb = pb + epsilon * 0.5 * grad_b(qa, qb)
+
+    (qa, qb, pa, pb)
+.
+
+// ── HMC step: leapfrog + Metropolis-Hastings accept/reject ──
+
+fun hmc_step(a: Float, b: Float, epsilon: Float, n_steps: Int) -> (Float, Float, Bool):
+    val (qa, qb, pa, pb) = leapfrog(a, b, epsilon, n_steps)
+
+    val h_new = 0.0 - log_posterior(qa, qb) + 0.5 * (pa * pa + pb * pb)
+    val h_old = 0.0 - log_posterior(a, b)  + 0.5 * (pa * pa + pb * pb)
+
+    if random_uniform() < exp(h_old - h_new):
+        (qa, qb, true)    // accept
+    else:
+        (a, b, false)     // reject
+    .
+.
+
+// ── Run MCMC chain ──
+
+val n_samples = 200
+val epsilon = 0.01
+val n_leapfrog = 10
+val warmup = 50
+
+var a = 0.0
+var b = 0.0
+var n_accept = 0
+var sum_a = 0.0
+var sum_b = 0.0
+
+for i in 0..n_samples - 1:
+    val (new_a, new_b, accepted) = hmc_step(a, b, epsilon, n_leapfrog)
+    a = new_a
+    b = new_b
+    if accepted:
+        n_accept = n_accept + 1
+    .
+    if i >= warmup:
+        sum_a = sum_a + a
+        sum_b = sum_b + b
+    .
+.
+
+val post_warmup = n_samples - warmup
+val mean_a = sum_a / to_float(post_warmup)
+val mean_b = sum_b / to_float(post_warmup)
+
+print("HMC Bayesian Linear Regression")
+print("true: a=2.5  b=1.0")
+print("posterior mean a: {mean_a}")
+print("posterior mean b: {mean_b}")
+
+// Key design points:
+//
+// 1. THREE effects compose in one program:
+//    - smooth: grad_a/grad_b use d/d operator → smooth handler builds tape
+//    - random: leapfrog samples momentum, hmc_step does accept/reject
+//    - state: the MCMC chain is mutable state
+//
+// 2. The model (log_posterior) is pure arithmetic — it never knows about AD.
+//    The smooth handler intercepts *, +, - during gradient computation.
+//
+// 3. The leapfrog integrator interleaves gradient calls (smooth) with
+//    random sampling (random) — effect composition handles this naturally.
+//
+// 4. This is the strongest composability demo in the target package:
+//    AD + randomness + mutable state, all via algebraic effects.

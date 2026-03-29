@@ -1,0 +1,59 @@
+// Target example: probabilistic programming via algebraic effects
+//
+// Source: dx-03/src/test/resources/programs/prob_basic.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX models probabilistic programs as effectful functions.
+// The prob effect provides sample and observe operations.
+// Different handlers implement different inference strategies.
+
+// ── Effect declaration ──
+// The prob effect is declared once and used by all models.
+
+effect prob:
+    sample(dist: Str, mu: Float, sigma: Float) -> Float
+    observe(dist: Str, mu: Float, sigma: Float, value: Float) -> Float
+.
+
+// ── Model: unknown mean, known variance ──
+// Prior: mu ~ Normal(0, 5)
+// Observation: x_obs ~ Normal(mu, 1) = 3.0
+// Posterior mean should shift toward 3.0
+
+fun model() -> Float !prob:
+    val mu = sample("normal", 0.0, 5.0)
+    observe("normal", mu, 1.0, 3.0)
+    mu
+.
+
+// ── Importance sampling handler ──
+// sample → draw from prior (forward sampling)
+// observe → accumulate log-likelihood weight
+
+val n_samples = 1000
+var weighted_sum = 0.0
+var total_weight = 0.0
+
+for i in 0..n_samples - 1:
+    var log_w = 0.0
+    val result = handle model() with:
+        prob'sample(dist, mu, sigma) ->
+            resume(normal_sample(mu, sigma))
+        prob'observe(dist, mu, sigma, value) ->
+            log_w = log_w + normal_log_pdf(value, mu, sigma)
+            resume(value)
+    .
+    val w = exp(log_w)
+    weighted_sum = weighted_sum + result * w
+    total_weight = total_weight + w
+.
+
+val posterior_mean = weighted_sum / total_weight
+// Analytical: (0*1 + 3*25)/(25+1) ≈ 2.88
+// With 1000 samples, should be roughly in [2.0, 3.5]
+print(posterior_mean)
+
+// Key design point: the model is a pure function with prob effects.
+// The handler decides the inference strategy. Swapping the handler
+// changes from importance sampling to MCMC, HMC, etc. — without
+// changing the model.

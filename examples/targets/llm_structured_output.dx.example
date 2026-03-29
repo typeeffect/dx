@@ -1,0 +1,87 @@
+// Target example: LLM structured output with typed schemas
+//
+// Source: synthetic — LLM-first language direction
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX treats LLM outputs as typed data, not strings. A schema declaration
+// gives the model call a compile-time contract for its output shape.
+// The runtime validates the model response against the schema before
+// the program sees it — no ad-hoc JSON parsing, no untyped dicts.
+
+// ── Schema for structured model output ──
+
+schema ExtractedEntity:
+    name: Str
+    entity_type: Str          // "person", "company", "location"
+    confidence: Float
+    context: Str
+.
+
+schema SentimentResult:
+    text: Str
+    sentiment: Str             // "positive", "negative", "neutral"
+    score: Float
+    key_phrases: List(Str)
+.
+
+// ── Model calls with typed output ──
+
+fun extract_entities(text: Str) -> List(ExtractedEntity) !llm:
+    model'complete(
+        prompt: "Extract named entities from: {text}",
+        output_schema: ExtractedEntity,
+        output_mode: "list",
+    )
+.
+
+fun analyze_sentiment(text: Str) -> SentimentResult !llm:
+    model'complete(
+        prompt: "Analyze sentiment: {text}",
+        output_schema: SentimentResult,
+    )
+.
+
+// ── Typed pipeline over model outputs ──
+
+fun analyze_document(doc: Str) -> Unit !llm !io:
+    val entities = extract_entities(doc)
+    val sentiment = analyze_sentiment(doc)
+
+    // These are typed — field access is compile-time checked
+    val people = entities
+      where: it'entity_type == "person"
+      where: it'confidence > 0.8
+
+    print("people found: {people'len}")
+    for e in people:
+        print("  {e'name} (confidence: {e'confidence})")
+    .
+
+    print("sentiment: {sentiment'sentiment} ({sentiment'score})")
+    print("key phrases: {sentiment'key_phrases}")
+.
+
+fun main() -> Unit !llm !io:
+    analyze_document("Alice from Acme Corp met Bob in New York to discuss the great Q3 results.")
+.
+
+// Key design points:
+//
+// 1. Model output is TYPED. The schema declaration gives extract_entities
+//    a return type of List(ExtractedEntity), not a string or dict.
+//    Field access (it'name, it'confidence) is compile-time checked.
+//
+// 2. The !llm effect marks model calls explicitly. The effect system
+//    tracks where LLM calls happen — they are not hidden side effects.
+//
+// 3. Schema validation happens at the boundary. If the model returns
+//    malformed JSON or missing fields, it fails before the program sees it.
+//    No try/except around JSON parsing.
+//
+// 4. The pipeline syntax (where/select) works on model outputs the same
+//    way it works on database results or CSV data. Typed data is typed data,
+//    regardless of where it comes from.
+//
+// 5. This is NOT "call OpenAI and parse JSON". It is a language-level
+//    contract between the program and the model. The compiler knows the
+//    output shape. The runtime enforces it.

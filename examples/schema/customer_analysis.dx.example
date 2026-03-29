@@ -1,0 +1,44 @@
+// Example: schema-provider surface (not yet implemented)
+//
+// This file shows the intended DX surface for compile-time
+// schema acquisition. It is a design reference, not runnable code.
+
+// 1. Declare a schema from a CSV file.
+//    The compiler acquires column names, types, and nullability
+//    at compile time and locks them in a .dxschema artifact.
+schema Customers = csv.schema("data/customers.csv")
+
+// 2. Use the schema as a nominal type.
+//    Customers.Row is a typed record with known fields.
+//    Field access uses the genitivo sassone syntax: row'field.
+fun high_value_customers(rows: List(Customers.Row)) -> List(Customers.Row):
+    rows
+      where: it'lifetime_value > 10000
+      select: it'name, it'region, it'lifetime_value
+.
+
+// 3. Cached artifact form.
+//    Normal builds consume the locked artifact without querying the datasource.
+schema Sales = parquet.schema("data/sales.parquet") using "schemas/sales.dxschema"
+
+// 4. Explicit refresh.
+//    Schema refresh is a separate step, not part of normal compilation.
+//    CLI: dx schema refresh schemas/sales.dxschema
+schema Events = parquet.schema("data/events.parquet") refresh
+
+// 5. Typed field access catches errors at compile time.
+//    If the schema says `revenue` is Int and `region` is Str,
+//    the compiler rejects `it'revenue + it'region` statically.
+fun revenue_by_region(sales: List(Sales.Row)) -> List(Sales.Row):
+    sales
+      group_by: it'region
+      select: it'revenue'sum
+.
+
+// Key design points:
+// - schema = compile-time metadata, not runtime data
+// - .dxschema = locked artifact, reviewable in version control
+// - refresh = explicit, not implicit
+// - field access = genitivo sassone (it'field), not dot notation
+// - Python interop (from py ... import ...) is separate — schema providers
+//   give DX a native typed view, Python interop is a foreign escape hatch

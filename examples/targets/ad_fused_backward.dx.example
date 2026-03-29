@@ -1,0 +1,77 @@
+// Target example: fused backward rules for numerically stable AD
+//
+// Source: dx-03/src/test/resources/programs/smooth_fused.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// Sometimes the auto-discovered backward rule is numerically unstable
+// or inefficient. `smooth_primitive` with an explicit `backward` block
+// lets the user provide a hand-written backward rule.
+//
+// The compiler uses the explicit rule instead of auto-discovering one.
+// This is the DX equivalent of JAX's `custom_vjp`.
+
+// ── Fused sigmoid: numerically stable backward ──
+// sigmoid(x) = 1 / (1 + exp(-x))
+// d sigmoid/dx = sigmoid(x) * (1 - sigmoid(x))
+//
+// Auto-discovery would trace through 1/(1+exp(-x)) which can overflow.
+// The fused rule reuses the forward result for a stable backward.
+
+smooth_primitive sigmoid(x: Float) -> Float:
+    1.0 / (1.0 + exp(0.0 - x))
+backward(x: Float, dout: Float) -> Float:
+    val s = 1.0 / (1.0 + exp(0.0 - x))
+    s * (1.0 - s) * dout
+.
+
+val v1 = sigmoid(0.0)
+print(v1)    // 0.5
+
+val g1 = grad((x) => sigmoid(x), 0.0)
+print(g1)    // 0.25
+
+// ── Fused softplus: stable log-sum-exp ──
+// softplus(x) = log(1 + exp(x))
+// d softplus/dx = sigmoid(x)
+
+smooth_primitive softplus(x: Float) -> Float:
+    ln(1.0 + exp(x))
+backward(x: Float, dout: Float) -> Float:
+    dout / (1.0 + exp(0.0 - x))
+.
+
+val v2 = softplus(0.0)
+print(v2)    // 0.693...
+
+val g2 = grad((x) => softplus(x), 0.0)
+print(g2)    // 0.5
+
+// ── Composed: fused primitives in expressions ──
+
+fun loss(x: Float) -> Float !smooth:
+    sigmoid(x) + softplus(x)
+.
+
+val g3 = grad(loss, 0.0)
+print(g3)    // 0.75  (0.25 + 0.5)
+
+// Key design points:
+//
+// 1. EXPLICIT BACKWARD RULE. The `backward` block provides a hand-written
+//    gradient. The compiler uses it instead of auto-discovery.
+//
+// 2. NUMERICAL STABILITY. The fused sigmoid backward reuses the forward
+//    value (s * (1-s)) instead of recomputing through exp(-x). This avoids
+//    overflow for large inputs.
+//
+// 3. SAME COMPOSABILITY. Fused primitives compose with the smooth effect
+//    exactly like auto-discovered ones. The caller never knows the difference.
+//
+// 4. DX-IN-DX. Both the forward and backward are written in DX — not in
+//    a foreign language or a special DSL. The backward rule is just DX code
+//    that the compiler trusts instead of deriving.
+//
+// 5. VS JAX/PYTORCH. This replaces:
+//    - JAX: @jax.custom_vjp + def_fwd() + def_bwd()
+//    - PyTorch: torch.autograd.Function + forward() + backward()
+//    In DX: one declaration with an optional backward block.

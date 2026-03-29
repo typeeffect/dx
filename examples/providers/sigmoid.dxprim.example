@@ -1,0 +1,46 @@
+# Draft .dxprim artifact format (NOT YET IMPLEMENTED)
+#
+# This file shows the intended shape of a locked AD primitive artifact.
+# It parallels .dxschema for schema providers.
+#
+# Produced by: dx prim refresh (future)
+# Consumed by: normal dx build (reads artifact, never re-derives)
+
+[primitive]
+format_version = "0.1.0"
+name = "sigmoid"
+rule_kind = "explicit_backward"
+source_fingerprint = "sha256:c4d5e6f7a8b9..."
+generated_at = "2026-03-29T16:00:00Z"
+
+[signature]
+params = [{ name = "x", type = "Float" }]
+return_type = "Float"
+
+[forward]
+# The forward body, stored for reference and validation.
+# The compiler does not re-parse this during normal builds.
+body = "1.0 / (1.0 + exp(0.0 - x))"
+
+[backward]
+# The explicit backward rule provided by the user.
+# rule_kind = "explicit_backward" means the compiler trusts this
+# instead of auto-deriving from the forward body.
+params = [{ name = "x", type = "Float" }, { name = "dout", type = "Float" }]
+return_type = "Float"
+body = "val s = 1.0 / (1.0 + exp(0.0 - x)); s * (1.0 - s) * dout"
+
+# Notes:
+#
+# - rule_kind "generated" means the compiler auto-derived the backward
+#   rule by symbolically differentiating the forward body.
+#
+# - rule_kind "explicit_backward" means the user provided a hand-written
+#   backward rule (for numerical stability, efficiency, etc.).
+#
+# - source_fingerprint detects when the source declaration changes.
+#   If the forward body or backward rule changes, the artifact must
+#   be refreshed.
+#
+# - The forward body is stored for validation but NOT re-executed
+#   during normal builds. The backward body IS the trusted rule.

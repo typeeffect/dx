@@ -13,11 +13,12 @@ pub struct NameResolutionReport {
 }
 
 pub fn resolve_module(module: &hir::Module) -> NameResolutionReport {
-    let globals = collect_globals(module);
     let mut diagnostics = Vec::new();
+    let globals = collect_globals(module, &mut diagnostics);
 
     for item in &module.items {
         match item {
+            hir::Item::Schema(_) => {}
             hir::Item::Function(function) => {
                 let mut scope = Scope::new();
                 for name in &globals {
@@ -42,22 +43,41 @@ pub fn resolve_module(module: &hir::Module) -> NameResolutionReport {
     NameResolutionReport { diagnostics }
 }
 
-fn collect_globals(module: &hir::Module) -> HashSet<String> {
+fn collect_globals(
+    module: &hir::Module,
+    diagnostics: &mut Vec<BindingDiagnostic>,
+) -> HashSet<String> {
     let mut globals = HashSet::new();
     for item in &module.items {
         match item {
+            hir::Item::Schema(schema) => {
+                define_global(&mut globals, diagnostics, &schema.name);
+            }
             hir::Item::ImportPy(import) => {
                 for name in &import.names {
-                    globals.insert(name.clone());
+                    define_global(&mut globals, diagnostics, name);
                 }
             }
             hir::Item::Function(function) => {
-                globals.insert(function.name.clone());
+                define_global(&mut globals, diagnostics, &function.name);
             }
             hir::Item::Statement(_) => {}
         }
     }
     globals
+}
+
+fn define_global(
+    globals: &mut HashSet<String>,
+    diagnostics: &mut Vec<BindingDiagnostic>,
+    name: &str,
+) {
+    if !globals.insert(name.to_string()) {
+        diagnostics.push(BindingDiagnostic {
+            function: "<module>".to_string(),
+            message: format!("duplicate top-level name `{name}`"),
+        });
+    }
 }
 
 fn resolve_block(
@@ -339,5 +359,50 @@ fun load(path: Str) -> Unit:
 "#,
         );
         assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rejects_duplicate_schema_name() {
+        let report = resolve(
+            r#"
+schema Customers = csv.schema("data/customers.csv")
+schema Customers = parquet.schema("data/customers.parquet")
+"#,
+        );
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(report.diagnostics[0]
+            .message
+            .contains("duplicate top-level name `Customers`"));
+    }
+
+    #[test]
+    fn rejects_schema_function_top_level_conflict() {
+        let report = resolve(
+            r#"
+schema Customers = csv.schema("data/customers.csv")
+
+fun Customers() -> Int:
+    0
+.
+"#,
+        );
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(report.diagnostics[0]
+            .message
+            .contains("duplicate top-level name `Customers`"));
+    }
+
+    #[test]
+    fn rejects_schema_import_top_level_conflict() {
+        let report = resolve(
+            r#"
+schema read_csv = csv.schema("data/customers.csv")
+from py pandas import read_csv
+"#,
+        );
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(report.diagnostics[0]
+            .message
+            .contains("duplicate top-level name `read_csv`"));
     }
 }

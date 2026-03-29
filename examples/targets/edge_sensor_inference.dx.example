@@ -1,0 +1,83 @@
+// Target example: edge sensor inference — typed input, bounded runtime
+//
+// Source: synthetic — edge/embedded AI direction
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// DX compiles to native LLVM. No Python runtime, no GC, deterministic memory.
+// This makes it a natural fit for edge inference: sensor data comes in typed,
+// the model runs in bounded memory, and the output drives real-time decisions.
+
+// ── Typed sensor input ──
+
+schema SensorReading:
+    timestamp: Int          // milliseconds since boot
+    temperature: Float      // Celsius
+    vibration: Float        // m/s²
+    pressure: Float         // kPa
+    device_id: Int
+.
+
+// ── Compact model ──
+// A small anomaly detection model deployed on-device.
+// Weights are loaded once at startup into shared buffers.
+
+type AnomalyModel:
+    weights_1: TensorStorage(Float, shape: [16, 4])
+    bias_1: TensorStorage(Float, shape: [16])
+    weights_2: TensorStorage(Float, shape: [1, 16])
+    bias_2: TensorStorage(Float, shape: [1])
+.
+
+fun AnomalyModel'predict(reading: SensorReading) -> Float:
+    val input = tensor_from([
+        reading'temperature,
+        reading'vibration,
+        reading'pressure,
+        to_float(reading'device_id),
+    ], shape: [4])
+
+    val h = relu(me'weights_1 o input + me'bias_1)
+    val score = sigmoid(me'weights_2 o h + me'bias_2)
+    score'get([0])
+.
+
+// ── Inference loop ──
+// Runs on-device with no heap allocation in the hot path.
+// The arena handles all temporaries; they are bulk-released each iteration.
+
+fun run_inference(model: AnomalyModel, readings: List(SensorReading)) -> Unit !io:
+    val arena = Arena'new()
+    val threshold = 0.8
+
+    for reading in readings:
+        val score = model'predict(reading)
+
+        if score > threshold:
+            alert(reading'device_id, reading'timestamp, score)
+        .
+
+        arena'reset()    // bulk-release temporaries each iteration
+    .
+.
+
+fun alert(device_id: Int, timestamp: Int, score: Float) -> Unit !io:
+    print("[ALERT] device={device_id} time={timestamp} score={score}")
+.
+
+// Key design points:
+//
+// 1. TYPED SENSOR INPUT. SensorReading is a schema with known fields.
+//    Field access (reading'temperature) is compile-time checked.
+//
+// 2. BOUNDED RUNTIME. The arena allocates temporaries for each inference
+//    step and bulk-releases them. No GC pause, no heap fragmentation.
+//
+// 3. NATIVE COMPILATION. DX compiles to LLVM native code. No Python
+//    interpreter, no JIT warmup. Startup is instant.
+//
+// 4. NO PYTHON AT DEPLOYMENT. The model weights are loaded from a file,
+//    not from a Python pickle. The inference loop is pure native DX.
+//
+// 5. EFFECT-AWARE. The !io effect tracks where the program does I/O.
+//    The inference function itself is pure — it could run under a test
+//    handler that captures outputs instead of printing.

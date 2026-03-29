@@ -1,0 +1,68 @@
+// Target example: Monty Hall problem via probabilistic effects
+//
+// Source: dx-03/src/test/resources/programs/prob_monty.dx
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// Classic probability puzzle: three doors, one car, two goats.
+// Player picks door 0, host opens a goat door, player can switch.
+// Switching wins 2/3 of the time.
+//
+// Uses the prob effect for random car placement.
+
+effect prob:
+    sample(tag: Str) -> Float
+.
+
+val n_runs = 3000
+var switch_wins = 0
+var stay_wins = 0
+
+for run in 0..n_runs - 1:
+    // Car placement: uniform random on {0, 1, 2}
+    val r = handle sample("car_door") with:
+        prob'sample(tag) ->
+            resume(random_uniform())
+    .
+
+    // Map uniform [0,1) to door index
+    var car = 0
+    if r >= 0.6667:
+        car = 2
+    elif r >= 0.3333:
+        car = 1
+    .
+
+    // Player always picks door 0
+    val pick = 0
+
+    // Host opens a door: not pick, not car
+    var host = 1
+    if car == 1:
+        host = 2
+    .
+
+    // Switch door: not pick, not host
+    var switch_door = 1
+    if host == 1:
+        switch_door = 2
+    .
+
+    // Count wins
+    if car == pick:
+        stay_wins = stay_wins + 1
+    .
+    if car == switch_door:
+        switch_wins = switch_wins + 1
+    .
+.
+
+// With 3000 runs: stay ≈ 1000, switch ≈ 2000
+if switch_wins > stay_wins:
+    print("switching wins more: ok")
+.
+
+// Key design point: the random sampling is an effect.
+// The handler provides the RNG implementation.
+// The model logic is deterministic given the effect handler.
+// This is the same pattern used for AD — effects separate
+// the "what" (model) from the "how" (implementation strategy).

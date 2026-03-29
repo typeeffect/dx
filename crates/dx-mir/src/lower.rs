@@ -18,6 +18,7 @@ impl Lowerer {
         let mut items = Vec::new();
         for item in &module.items {
             match item {
+                typed::Item::Schema(_) => {}
                 typed::Item::ImportPy(import) => items.push(mir::Item::ImportPy(import.clone())),
                 typed::Item::Function(function) => {
                     items.push(mir::Item::Function(self.lower_function(function)));

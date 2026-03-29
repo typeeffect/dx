@@ -1,0 +1,85 @@
+// Target example: typed data pipeline with schema providers
+//
+// Source: synthetic — extends examples/schema/customer_analysis.dx.example
+// Status: semantic target — not yet parser-stable in dx-bootstrap
+//
+// This demo shows the typed-data wedge: compile-time schema acquisition
+// gives DX native typed access to external data without dynamic wrappers.
+// Field access uses genitivo sassone (it'field), not dot notation.
+
+// ── Schema declarations ──
+// The compiler acquires column names, types, and nullability at compile time
+// and locks them in .dxschema artifacts.
+
+schema Customers = csv.schema("data/customers.csv")
+schema Sales = csv.schema("data/sales.csv")
+
+// ── Typed pipeline ──
+// Every field access is statically checked against the schema.
+// Misspelled fields, wrong types, and nullable access errors are caught
+// at compile time — not at runtime.
+
+fun high_value_customers(customers: List(Customers.Row)) -> List(Customers.Row):
+    customers
+      where: it'lifetime_value > 10000
+      where: it'region == "EU"
+.
+
+fun revenue_by_region(sales: List(Sales.Row)) -> Table:
+    sales
+      group_by: it'region
+      select:
+        region: it'region
+        total: it'revenue'sum
+        count: it'count
+      order_by: total desc
+.
+
+// ── Join across schemas ──
+// Typed joins are safe because both schemas are known at compile time.
+
+fun customer_revenue(
+    customers: List(Customers.Row),
+    sales: List(Sales.Row),
+) -> Table:
+    customers
+      join: sales on: it'id == sales'customer_id
+      select:
+        name: customers'name
+        region: customers'region
+        total_revenue: sales'revenue'sum
+      where: total_revenue > 5000
+.
+
+// ── Main ──
+
+fun main() -> Unit !io:
+    val customers = load(Customers, "data/customers.csv")
+    val sales = load(Sales, "data/sales.csv")
+
+    val top = high_value_customers(customers)
+    print("high-value EU customers: {top'len}")
+
+    val by_region = revenue_by_region(sales)
+    print(by_region)
+
+    val report = customer_revenue(customers, sales)
+    print(report)
+.
+
+// Key design points:
+//
+// 1. Schema = compile-time metadata. The .dxschema artifact is locked
+//    and reviewed in version control. Normal builds never query the datasource.
+//
+// 2. Field access is genitivo sassone: it'region, it'revenue'sum.
+//    This reads as natural language: "the region", "the revenue's sum".
+//
+// 3. The pipeline syntax (where/group_by/select/order_by) is native DX —
+//    not a string DSL or embedded SQL. The compiler checks every field reference.
+//
+// 4. Nullable fields from the schema produce Option(T) in the Row type.
+//    Accessing a nullable field without handling None is a compile-time error.
+//
+// 5. This replaces pandas/polars for typed workflows: same expressiveness,
+//    but with compile-time safety and no Python runtime dependency.

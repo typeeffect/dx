@@ -5,9 +5,19 @@ pub struct Module {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    Schema(SchemaDecl),
     ImportPy(ImportPyDecl),
     Function(FunctionDecl),
     Statement(Stmt),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaDecl {
+    pub name: String,
+    pub provider: String,
+    pub source: String,
+    pub using_artifact: Option<String>,
+    pub refresh: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

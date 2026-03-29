@@ -8,12 +8,17 @@ closure_call_str
 closure_call_two_args
 closure_call_void_ret_three_args
 main_arithmetic
+main_closure_call_bool
 main_closure_call_int
+main_closure_call_multi_capture
+main_closure_call_nested
 main_closure_call_subtract
 main_closure_call_two_args
 main_returns_zero
 main_thunk_arithmetic
+main_thunk_bool
 main_thunk_capture
+main_thunk_three_capture
 match_nominal
 match_with_closure_call
 py_call_dynamic

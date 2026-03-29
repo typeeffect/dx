@@ -1,7 +1,12 @@
 main_arithmetic 42
+main_closure_call_bool 42
 main_closure_call_int 42
+main_closure_call_multi_capture 42
+main_closure_call_nested 42
 main_closure_call_subtract 42
 main_closure_call_two_args 42
 main_returns_zero 0
 main_thunk_arithmetic 42
+main_thunk_bool 42
 main_thunk_capture 42
+main_thunk_three_capture 42

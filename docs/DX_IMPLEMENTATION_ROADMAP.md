@@ -46,13 +46,34 @@ It is now in backend execution mode.
 The current implementation focus is:
 
 - keeping the closed backend/toolchain baseline stable
-- expanding the runnable executable subset beyond the first native baseline
-- evolving runtime semantics beyond the current stub where that unlocks real execution
+- keeping the now-substantially-complete strategic target examples package
+  aligned with the language direction
 - preparing the next language-facing feature wave after backend milestones A/B/C
+- moving schema providers from artifact tooling toward language integration
+- moving the region/shared-buffer memory model from runtime crate slices toward
+  broader language/runtime integration
 
 The next major frontend-adjacent feature after backend execution stabilizes is:
 
 - compile-time schema providers for typed datasource metadata
+
+The next major runtime-model feature after schema-provider groundwork is:
+
+- a region-based memory model suitable for deterministic native execution and
+  ML/inference workloads
+
+The broader long-term platform trajectory beyond the active implementation
+milestones is documented in:
+
+- `docs/DX_LONG_TERM_ROADMAP.md`
+
+The current strategic recovery map for `dx-03` design demos is documented in:
+
+- `docs/DX_TARGET_EXAMPLES_RECOVERY.md`
+
+That recovery package is now substantially complete for the major strategic
+`dx-03` demos and should be treated as a stable semantic target layer, not as
+an open-ended catch-all example bucket.
 
 The current backend subset that is mechanically exercised through demo fixtures
 and audit tooling is documented in:
@@ -73,6 +94,24 @@ The next concrete runtime-expansion targets after the current runnable subset ar
 - richer runtime env shapes beyond the current single-capture cases
 - less-stub Python and match runtime semantics
 
+## Long-Term Direction
+
+This roadmap remains the near-term implementation order.
+
+The longer-term platform stack is now fixed separately as:
+
+1. native deterministic core
+2. LLM-first design principle across the stack
+3. systems-capable runtime/infrastructure growth
+4. typed data language growth
+5. ML/inference language growth
+6. probabilistic language growth
+7. progressive Python displacement
+
+Reference:
+
+- `docs/DX_LONG_TERM_ROADMAP.md`
+
 ## Compiler Pipeline
 
 The intended pipeline is now:
@@ -92,6 +131,7 @@ The intended pipeline is now:
 Future extension planned after the executable backend baseline:
 
 12. explicit schema artifact acquisition for typed external data shapes
+13. explicit region/shared-buffer memory model integration
 
 Immediate executable-path constraint:
 
@@ -579,9 +619,15 @@ Reference plan:
 ## Post-Baseline Roadmap
 
 With backend milestones A, B, and C closed for the current scope, the next
-implementation wave should be organized around three follow-on milestones.
+implementation wave should be organized around:
+
+- two active implementation milestones
+- one semantic-target track
+- one longer-term executable-program-model milestone
 
 ### Post-Baseline Milestone D: Expand Runnable Runtime Semantics
+
+**Status: advanced.**
 
 Goal:
 
@@ -602,6 +648,8 @@ Exit criteria:
 
 ### Post-Baseline Milestone E: Widen the Executable Program Model
 
+**Status: not yet active.**
+
 Goal:
 
 - define the next stable executable contract after the initial `main() -> Int`
@@ -618,26 +666,109 @@ Exit criteria:
 - executable-program semantics are documented and enforced beyond the initial
   narrow contract
 
-### Post-Baseline Milestone F: Compile-Time Schema Providers
+### Post-Baseline Milestone F: Compile-Time Providers
+
+**Status: in progress, tooling slice landed.**
 
 Goal:
 
 - start the first real language-facing feature wave after backend closure
+- establish one narrow compile-time extension machinery instead of separate
+  one-off systems
 
 Focus:
 
-- locked `.dxschema` artifacts
-- explicit compile-time schema acquisition
+- locked `.dxschema` artifacts as the first provider slice
+- explicit compile-time metadata acquisition
 - typed datasource shape integration with the existing type/effect core
+- preserving room for future AD primitive providers built on the same model
 
 Reference plan:
 
+- `docs/DX_COMPILETIME_PROVIDERS_PLAN.md`
 - `docs/DX_SCHEMA_PROVIDER_PLAN.md`
+- `docs/DX_SCHEMA_ARTIFACT_SPEC.md`
+- `docs/DX_AD_PRIMITIVE_PROVIDER_PLAN.md`
 
 Exit criteria:
 
-- effect mismatches become diagnosable
-- `!py` boundary is enforced
+- locked `.dxschema` artifacts have a stable validated format
+- source declaration vs artifact mismatch is mechanically checkable
+- the compiler/runtime plan is ready for future `schema ...` language
+  integration without ad hoc side channels
+- the milestone is framed as a reusable provider core, not as schema-only
+  special casing
+
+Current implemented substrate:
+
+- `crates/dx-schema`
+- `.dxschema` parse / validate / canonical render
+- `dx-schema-validate`
+- `dx-schema-match`
+
+### Post-Baseline Milestone G: Region-Based Memory Model
+
+**Status: in progress, first runtime/library wave landed.**
+
+Goal:
+
+- establish a safe, simple memory model for native `dx` beyond the current
+  backend/runtime baseline
+
+Focus:
+
+- regions/arenas for temporary memory
+- explicit shared buffers for long-lived or shared storage
+- deterministic behavior suitable for data and inference workloads
+- a model safer than C/Nim without Rust-level borrow-checker complexity
+
+Reference plan:
+
+- `docs/DX_MEMORY_MODEL_PLAN.md`
+- `docs/DX_MEMORY_MODEL_IMPLEMENTATION_PLAN.md`
+
+Exit criteria:
+
+- the memory-model direction is fixed in docs and compiler/runtime planning
+- arena/region and shared-buffer concepts are explicit enough to guide future
+  implementation work
+- the runtime/library substrate exists strongly enough to host future language
+  integration
+
+Current implemented substrate:
+
+- `crates/dx-memory`
+- `Arena`, `ArenaBuf`, `SharedBuffer`, `BufferView`
+- `SharedBufferPool`, `PooledBuffer`
+- `TensorStorage`, `TensorView`
+- narrow G5 boundary via `ForeignPtr` / `ForeignBuffer`
+
+### Post-Baseline Track T: Strategic Target Recovery
+
+**Status: substantially complete for major `dx-03` demos.**
+
+Goal:
+
+- keep the strongest `dx-03` semantic demos visible in the new repo without
+  pretending the surface syntax is parser-stable
+
+Reference:
+
+- `docs/DX_TARGET_EXAMPLES_RECOVERY.md`
+- `examples/targets/`
+
+Current state:
+
+- effects / async tranche recovered
+- AD / PPL tranche recovered
+- multi-shot / search tranche recovered
+- ML / tensor tranche recovered
+
+Remaining work in this track:
+
+- keep the package coherent as the effect surface stabilizes
+- add only genuinely new target examples, not near-duplicates
+- avoid drift between target examples and the language vision
 
 ## Milestone 7: Python Boundary
 

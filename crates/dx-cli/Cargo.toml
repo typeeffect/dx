@@ -1,0 +1,12 @@
+[package]
+name = "dx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dx-schema = { path = "../dx-schema" }
+
+[[bin]]
+name = "dx"
+path = "src/main.rs"

@@ -6,3 +6,4 @@ license.workspace = true
 
 [dependencies]
 dx-parser = { path = "../dx-parser" }
+dx-schema = { path = "../dx-schema" }

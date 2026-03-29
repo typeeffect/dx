@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "dx-cli"
+version = "0.1.0"
+dependencies = [
+ "dx-schema",
+]
+
+[[package]]
 name = "dx-codegen"
 version = "0.1.0"
 dependencies = [
@@ -17,6 +24,7 @@ name = "dx-hir"
 version = "0.1.0"
 dependencies = [
  "dx-parser",
+ "dx-schema",
 ]
 
 [[package]]
@@ -39,7 +47,12 @@ dependencies = [
  "dx-mir",
  "dx-parser",
  "dx-runtime-stub",
+ "dx-schema",
 ]
+
+[[package]]
+name = "dx-memory"
+version = "0.1.0"
 
 [[package]]
 name = "dx-mir"
@@ -65,3 +78,10 @@ dependencies = [
 [[package]]
 name = "dx-runtime-stub"
 version = "0.1.0"
+
+[[package]]
+name = "dx-schema"
+version = "0.1.0"
+dependencies = [
+ "dx-parser",
+]

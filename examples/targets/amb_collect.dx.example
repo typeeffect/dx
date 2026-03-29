@@ -1,0 +1,42 @@
+-- Semantic target recovered from:
+-- /home/frapas/dx-lang/dx-03/src/test/resources/programs/amb_collect.dx
+
+effect Amb:
+    flip() -> Bool
+.
+
+fun score_pair() -> Int !Amb:
+    val a = flip()
+    val b = flip()
+
+    var score = 0
+
+    if a:
+        score = score + 1
+    .
+
+    if b:
+        score = score + 10
+    .
+
+    score
+.
+
+fun collect_scores() -> List[Int] !Amb:
+    [score_pair()]
+.
+
+fun main() -> Unit !io:
+    val results =
+        handle collect_scores() with
+            flip():
+                list_concat(resume(true), resume(false))
+        .
+
+    print(results'str())
+    print(results'len()'str())
+.
+
+-- Target claim:
+-- a multi-shot handler can aggregate all result branches into one collection
+-- instead of collapsing the computation to a single outcome

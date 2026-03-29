@@ -1,5 +1,5 @@
 use crate::{hir, types::Type};
-use dx_parser::ImportPyDecl;
+use dx_parser::{ImportPyDecl, SchemaDecl};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
@@ -8,6 +8,7 @@ pub struct Module {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    Schema(SchemaDecl),
     ImportPy(ImportPyDecl),
     Function(Function),
     Statement(Stmt),

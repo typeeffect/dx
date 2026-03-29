@@ -1,0 +1,18 @@
+[schema]
+format_version = "0.1.0"
+name = "Orders"
+provider = "parquet"
+source = "data/orders.parquet"
+source_fingerprint = "sha256:b3c4d5e6f7a8..."
+schema_fingerprint = "sha256:8a7f6e5d4c3b..."
+generated_at = "2026-03-29T14:00:00Z"
+
+[fields]
+customer_id = { type = "Int", nullable = false }
+discount_pct = { type = "Float", nullable = true }
+order_date = { type = "Str", nullable = false }
+order_id = { type = "Int", nullable = false }
+product_category = { type = "Str", nullable = false }
+quantity = { type = "Int", nullable = false }
+status = { type = "Str", nullable = false }
+unit_price = { type = "Float", nullable = false }

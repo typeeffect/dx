@@ -39,6 +39,8 @@ The current canonical demos live in:
 - `examples/backend/closure_call_void_ret_three_args.dx`
 - `examples/backend/main_arithmetic.dx`
 - `examples/backend/main_closure_call_int.dx`
+- `examples/backend/main_closure_call_multi_capture.dx`
+- `examples/backend/main_closure_call_nested.dx`
 - `examples/backend/main_returns_zero.dx`
 - `examples/backend/main_thunk_capture.dx`
 - `examples/backend/match_nominal.dx`
@@ -216,6 +218,8 @@ All executable-entry demos are now runnable:
 - `examples/backend/main_returns_zero.dx` (exit code 0)
 - `examples/backend/main_arithmetic.dx` (exit code 42)
 - `examples/backend/main_closure_call_int.dx` (exit code 42)
+- `examples/backend/main_closure_call_multi_capture.dx` (exit code 42)
+- `examples/backend/main_closure_call_nested.dx` (exit code 42)
 - `examples/backend/main_closure_call_subtract.dx` (exit code 42)
 - `examples/backend/main_closure_call_two_args.dx` (exit code 42)
 - `examples/backend/main_thunk_arithmetic.dx` (exit code 42)
@@ -228,13 +232,23 @@ Ordinary closure-call dispatch is operational through the runtime stub.
 
 This subset is intentionally narrow.
 
-It still does not prove:
+Currently proven:
 
-- multi-capture ordinary-closure runtime semantics
+- pure arithmetic (`main() -> Int`)
+- single-arg `i64` closure dispatch (no captures)
+- two-arg `i64` closure dispatch (no captures)
+- multi-capture `i64` closure dispatch
+- nested closure calls (result of one call passed to another)
+- thunk capture and force
+
+Not yet proven through executable-entry demos:
+
+- mixed-type captures (ptr + i64 in same closure env)
+- closures with 3+ captures
+- `f64` / `i1` / `ptr`-returning closure dispatch
 - Python execution
 - full ADT payload extraction
-- full non-stub runtime behavior
-- widened executable-program semantics beyond the current `main() -> Int`
+- widened executable-program semantics beyond `main() -> Int`
 
 ## Why This Matters
 
