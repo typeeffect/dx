@@ -91,6 +91,16 @@ Behavior:
 
 ## Suggested Commands
 
+Or use the top-level `Makefile` shortcuts:
+
+```bash
+make demo-plan DEMO=examples/backend/closure_call_int.dx
+make demo-emit DEMO=examples/backend/closure_call_two_args.dx
+make runtime-stub-info
+```
+
+Direct commands:
+
 Emit real textual LLVM IR:
 
 ```bash

@@ -3,5 +3,6 @@
 *.swo
 target/
 build/
+examples/backend/*.ll
 .idea/
 .vscode/
