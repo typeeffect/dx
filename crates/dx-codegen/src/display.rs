@@ -173,6 +173,7 @@ fn render_low_step(step: &LowStep, out: &mut String) {
                     write!(out, " (args={arg_count}, abi_args=[{rendered}])").unwrap();
                 }
                 LowRuntimeCallKind::ClosureCreate {
+                    entry_function,
                     captures,
                     arity,
                 } => {
@@ -181,7 +182,11 @@ fn render_low_step(step: &LowStep, out: &mut String) {
                         .map(render_low_value)
                         .collect::<Vec<_>>()
                         .join(", ");
-                    write!(out, " (captures=[{rendered}], arity={arity})").unwrap();
+                    write!(
+                        out,
+                        " (captures=[{rendered}], arity={arity}, entry={entry_function})"
+                    )
+                    .unwrap();
                 }
                 LowRuntimeCallKind::ClosureInvoke {
                     closure,
@@ -318,7 +323,7 @@ mod tests {
     fn snapshot_closure_create_step() {
         let out = render("fun f(x: Int) -> lazy Int:\n    lazy x\n.\n");
         assert!(out.contains("call dx_rt_closure_create"), "got:\n{out}");
-        assert!(out.contains("(captures=[_0: i64], arity=0)"), "got:\n{out}");
+        assert!(out.contains("(captures=[_0: i64], arity=0, entry=f$closure$0)"), "got:\n{out}");
     }
 
     #[test]

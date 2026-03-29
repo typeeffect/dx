@@ -97,6 +97,7 @@ pub enum Rvalue {
         effects: Vec<String>,
     },
     Closure {
+        entry_function: String,
         captures: Vec<ClosureCapture>,
         param_types: Vec<Type>,
         return_type: Type,

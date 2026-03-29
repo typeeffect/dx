@@ -221,7 +221,11 @@ fn lower_instructions(step: &LowStep, state: &mut LoweringState) -> Vec<Instruct
             ret,
             kind,
         } => match kind {
-            LowRuntimeCallKind::ClosureCreate { captures, arity } => {
+            LowRuntimeCallKind::ClosureCreate {
+                captures,
+                arity,
+                entry_function: _,
+            } => {
                 let env = format!("%env_{statement}");
                 vec![
                     Instruction::PackEnv {
@@ -297,7 +301,11 @@ fn runtime_call_comment(kind: &LowRuntimeCallKind) -> String {
         LowRuntimeCallKind::ClosureCreate {
             captures,
             arity,
-        } => format!("closure-create captures={} arity={arity}", captures.len()),
+            entry_function,
+        } => format!(
+            "closure-create captures={} arity={arity} entry={entry_function}",
+            captures.len()
+        ),
         LowRuntimeCallKind::ClosureInvoke {
             arg_count,
             thunk,

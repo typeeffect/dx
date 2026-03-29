@@ -43,6 +43,7 @@ pub struct LoweredClosureCreation {
     pub statement: usize,
     pub destination: mir::LocalId,
     pub runtime_symbol: &'static str,
+    pub entry_function: String,
     pub captures: Vec<mir::ClosureCapture>,
     pub param_types: Vec<Type>,
     pub return_type: Type,
@@ -116,6 +117,7 @@ pub fn build_closure_runtime_plan(module: &mir::Module) -> ClosureRuntimePlan {
                 let mir::Statement::Assign { place, value } = stmt;
                 match value {
                     mir::Rvalue::Closure {
+                        entry_function,
                         captures,
                         param_types,
                         return_type,
@@ -128,6 +130,7 @@ pub fn build_closure_runtime_plan(module: &mir::Module) -> ClosureRuntimePlan {
                             statement: statement_index,
                             destination: *place,
                             runtime_symbol: ClosureRuntimeHook::Create.symbol(),
+                            entry_function: entry_function.clone(),
                             captures: captures.clone(),
                             param_types: param_types.clone(),
                             return_type: return_type.clone(),

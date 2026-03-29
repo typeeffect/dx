@@ -119,6 +119,7 @@ pub fn render_closure_plan(plan: &ClosureRuntimePlan) -> String {
             for effect in &creation.effects {
                 write!(out, " !{effect}").unwrap();
             }
+            write!(out, " entry {}", creation.entry_function).unwrap();
             if !creation.captures.is_empty() {
                 write!(out, "  captures [").unwrap();
                 for (i, cap) in creation.captures.iter().enumerate() {
@@ -322,11 +323,13 @@ fn render_runtime_op(op: &RuntimeOp) -> String {
             write!(out, "(args={arg_count})").unwrap();
         }
         RuntimeOpKind::ClosureCreate {
+            entry_function,
             captures,
             param_types,
         } => {
             let params: Vec<String> = param_types.iter().map(render_type).collect();
             write!(out, " closure({})", params.join(", ")).unwrap();
+            write!(out, " entry {entry_function}").unwrap();
             if !captures.is_empty() {
                 write!(out, " captures [").unwrap();
                 for (i, cap) in captures.iter().enumerate() {
@@ -985,8 +988,9 @@ mod tests {
         let plan = crate::throw::build_throw_runtime_plan_from_module(&module);
         let out = render_throw_plan(&plan);
 
-        assert!(out.contains("(no throw sites)"), "got:\n{out}");
-        assert!(plan.required_hooks.is_empty());
+        assert!(out.contains("make$closure$0/bb0[0]"), "got:\n{out}");
+        assert!(out.contains("dx_rt_py_call_function"), "got:\n{out}");
+        assert_eq!(plan.required_hooks, vec![crate::throw::ThrowRuntimeHook::CheckPending]);
     }
 
     #[test]

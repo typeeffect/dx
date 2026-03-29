@@ -99,6 +99,7 @@ pub enum LowRuntimeCallKind {
         args: Vec<LowValue>,
     },
     ClosureCreate {
+        entry_function: String,
         captures: Vec<LowValue>,
         arity: usize,
     },

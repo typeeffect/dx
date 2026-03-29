@@ -166,9 +166,11 @@ fn lower_runtime_op(op: &RuntimeOp, locals: &[mir::Local]) -> LowStep {
                     .collect(),
             },
             RuntimeOpKind::ClosureCreate {
+                entry_function,
                 captures,
                 param_types,
             } => LowRuntimeCallKind::ClosureCreate {
+                entry_function: entry_function.clone(),
                 captures: captures
                     .iter()
                     .map(|capture| {
@@ -365,7 +367,7 @@ mod tests {
 
         assert!(steps.iter().any(|step| matches!(
             step,
-            LowStep::RuntimeCall { symbol, kind: LowRuntimeCallKind::ClosureCreate { captures, arity: 0 }, .. }
+            LowStep::RuntimeCall { symbol, kind: LowRuntimeCallKind::ClosureCreate { captures, arity: 0, .. }, .. }
             if *symbol == "dx_rt_closure_create" && captures.len() == 1
         )));
         assert!(steps.iter().any(|step| matches!(

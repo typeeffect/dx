@@ -131,6 +131,7 @@ fn render_rvalue(rv: &mir::Rvalue, out: &mut String) {
             }
         }
         mir::Rvalue::Closure {
+            entry_function,
             captures,
             param_types,
             return_type,
@@ -147,6 +148,7 @@ fn render_rvalue(rv: &mir::Rvalue, out: &mut String) {
             for effect in effects {
                 write!(out, " !{effect}").unwrap();
             }
+            write!(out, " entry {entry_function}").unwrap();
             if !captures.is_empty() {
                 write!(out, " captures [").unwrap();
                 for (i, capture) in captures.iter().enumerate() {

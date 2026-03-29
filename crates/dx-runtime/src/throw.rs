@@ -140,8 +140,11 @@ mod tests {
         );
         let plan = build_throw_runtime_plan_from_module(&module);
 
-        assert!(plan.required_hooks.is_empty());
-        assert!(plan.sites.is_empty());
+        assert_eq!(plan.required_hooks, vec![ThrowRuntimeHook::CheckPending]);
+        assert_eq!(plan.sites.len(), 1);
+        assert_eq!(plan.sites[0].function, "make$closure$0");
+        assert_eq!(plan.sites[0].boundary, ThrowBoundaryKind::PythonFunction);
+        assert_eq!(plan.sites[0].source_runtime_symbol, "dx_rt_py_call_function");
     }
 
     #[test]

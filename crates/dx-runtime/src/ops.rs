@@ -33,6 +33,7 @@ pub enum RuntimeOpKind {
         runtime_args: Vec<mir::Operand>,
     },
     ClosureCreate {
+        entry_function: String,
         captures: Vec<mir::ClosureCapture>,
         param_types: Vec<Type>,
     },
@@ -132,6 +133,7 @@ fn lower_creation(
             .get(&(creation.function.clone(), creation.destination))
             .cloned(),
         kind: RuntimeOpKind::ClosureCreate {
+            entry_function: creation.entry_function.clone(),
             captures: creation.captures.clone(),
             param_types: creation.param_types.clone(),
         },

@@ -8,23 +8,25 @@ pub fn lower_module(module: &typed::Module) -> mir::Module {
 }
 
 #[derive(Default)]
-struct Lowerer;
+struct Lowerer {
+    next_closure_id: usize,
+    queued_functions: Vec<mir::Function>,
+}
 
 impl Lowerer {
     fn lower_module(&mut self, module: &typed::Module) -> mir::Module {
-        mir::Module {
-            items: module
-                .items
-                .iter()
-                .filter_map(|item| match item {
-                    typed::Item::ImportPy(import) => Some(mir::Item::ImportPy(import.clone())),
-                    typed::Item::Function(function) => {
-                        Some(mir::Item::Function(self.lower_function(function)))
-                    }
-                    typed::Item::Statement(_) => None,
-                })
-                .collect(),
+        let mut items = Vec::new();
+        for item in &module.items {
+            match item {
+                typed::Item::ImportPy(import) => items.push(mir::Item::ImportPy(import.clone())),
+                typed::Item::Function(function) => {
+                    items.push(mir::Item::Function(self.lower_function(function)));
+                    items.extend(self.queued_functions.drain(..).map(mir::Item::Function));
+                }
+                typed::Item::Statement(_) => {}
+            }
         }
+        mir::Module { items }
     }
 
     fn lower_function(&mut self, function: &typed::Function) -> mir::Function {
@@ -257,6 +259,8 @@ impl Lowerer {
                 captures,
                 body,
             } => {
+                let entry_function =
+                    self.queue_closure_function(&builder.name, params, captures, body, &expr.ty);
                 let (return_type, effects) = match &expr.ty {
                     Type::Function { ret, effects, .. } => ((**ret).clone(), effects.clone()),
                     _ => match body.as_ref() {
@@ -269,6 +273,7 @@ impl Lowerer {
                     mir::Statement::Assign {
                         place: dest,
                         value: mir::Rvalue::Closure {
+                            entry_function,
                             captures: captures
                                 .iter()
                                 .filter_map(|capture| {
@@ -462,6 +467,73 @@ impl Lowerer {
             | typed::CallTarget::Dynamic => {}
         }
         effects
+    }
+
+    fn queue_closure_function(
+        &mut self,
+        parent_name: &str,
+        params: &[typed::ClosureParam],
+        captures: &[typed::ClosureCapture],
+        body: &typed::ClosureBody,
+        expr_ty: &Type,
+    ) -> String {
+        let name = format!("{parent_name}$closure${}", self.next_closure_id);
+        self.next_closure_id += 1;
+
+        let (return_type, effects) = match expr_ty {
+            Type::Function { ret, effects, .. } => (Some((**ret).clone()), effects.clone()),
+            _ => match body {
+                typed::ClosureBody::Expr(expr) => (Some(expr.ty.clone()), Vec::new()),
+                typed::ClosureBody::Block(block) => (Some(block.ty.clone()), Vec::new()),
+            },
+        };
+
+        let mut builder = FunctionBuilder::new(name.clone(), return_type, effects);
+        let mut env = HashMap::new();
+        let mut lowered_params = Vec::new();
+
+        for capture in captures {
+            let local = builder.alloc_local(
+                format!("capture_{}", capture.name),
+                capture.ty.clone(),
+                capture.mutable,
+                false,
+            );
+            env.insert(capture.name.clone(), local);
+            lowered_params.push(local);
+        }
+
+        for param in params {
+            let local = builder.alloc_local(param.name.clone(), param.ty.clone(), false, false);
+            env.insert(param.name.clone(), local);
+            lowered_params.push(local);
+        }
+
+        let entry = builder.entry;
+        match body {
+            typed::ClosureBody::Expr(expr) => {
+                let block = typed::Block {
+                    stmts: Vec::new(),
+                    result: Some(expr.clone()),
+                    ty: expr.ty.clone(),
+                };
+                self.lower_block_tail(&block, &mut builder, entry, &env, Tail::Return);
+            }
+            typed::ClosureBody::Block(block) => {
+                self.lower_block_tail(block, &mut builder, entry, &env, Tail::Return);
+            }
+        }
+
+        self.queued_functions.push(mir::Function {
+            name: builder.name.clone(),
+            params: lowered_params,
+            locals: builder.locals,
+            blocks: builder.blocks,
+            return_type: builder.return_type,
+            effects: builder.effects,
+        });
+
+        name
     }
 }
 
@@ -696,5 +768,48 @@ mod tests {
             }
             other => panic!("expected function, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn closure_rvalue_records_synthetic_entry_function() {
+        let module = lower("fun make(x: Int) -> lazy Int:\n    lazy x\n.\n");
+        match &module.items[0] {
+            mir::Item::Function(function) => {
+                let found = function.blocks[0].statements.iter().any(|stmt| {
+                    matches!(
+                        stmt,
+                        mir::Statement::Assign {
+                            value: mir::Rvalue::Closure { entry_function, .. },
+                            ..
+                        } if entry_function == "make$closure$0"
+                    )
+                });
+                assert!(found, "expected closure with synthetic entry function");
+            }
+            other => panic!("expected function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowering_emits_synthetic_closure_function_items() {
+        let module = lower("fun main() -> Int:\n    val f = (x: Int) => x + 1\n    f(41)\n.\n");
+        let function_names: Vec<_> = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                mir::Item::Function(function) => Some(function.name.as_str()),
+                mir::Item::ImportPy(_) => None,
+            })
+            .collect();
+
+        assert_eq!(function_names, vec!["main", "main$closure$0"]);
+
+        let closure = match &module.items[1] {
+            mir::Item::Function(function) => function,
+            other => panic!("expected synthetic closure function, got {other:?}"),
+        };
+        assert_eq!(closure.params.len(), 1);
+        assert_eq!(closure.locals[closure.params[0]].name, "x");
+        assert_eq!(closure.return_type, Some(Type::Int));
     }
 }
