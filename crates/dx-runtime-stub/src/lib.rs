@@ -43,6 +43,16 @@ fn closure_ptr(closure: ClosureHandle) -> Option<*const StubClosure> {
     }
 }
 
+fn closure_code_ptr(closure: ClosureHandle) -> Option<(*const StubClosure, *mut c_void)> {
+    let closure_ptr = closure_ptr(closure)?;
+    let closure = unsafe { &*closure_ptr };
+    if closure.code_ptr.is_null() {
+        None
+    } else {
+        Some((closure_ptr, closure.code_ptr))
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_closure_create(
     code_ptr: *mut c_void,
@@ -79,15 +89,18 @@ pub extern "C" fn dx_rt_closure_call_i64_2_i64_i64(
     arg0: i64,
     arg1: i64,
 ) -> i64 {
-    let Some(closure) = closure_ptr(closure) else {
+    let Some((closure_ptr, code_ptr)) = closure_code_ptr(closure) else {
         return 0;
     };
-    let closure = unsafe { &*closure };
-    if !closure.env.is_null() || closure.code_ptr.is_null() {
-        return 0;
+    let closure = unsafe { &*closure_ptr };
+    if closure.env.is_null() {
+        let fun: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(code_ptr) };
+        fun(arg0, arg1)
+    } else {
+        let capture0 = unsafe { *(closure.env as *const i64) };
+        let fun: extern "C" fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(code_ptr) };
+        fun(capture0, arg0, arg1)
     }
-    let fun: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(closure.code_ptr) };
-    fun(arg0, arg1)
 }
 
 #[unsafe(no_mangle)]
@@ -95,16 +108,20 @@ pub extern "C" fn dx_rt_closure_call_ptr_1_ptr(
     closure: ClosureHandle,
     arg0: *mut c_void,
 ) -> *mut c_void {
-    let Some(closure) = closure_ptr(closure) else {
+    let Some((closure_ptr, code_ptr)) = closure_code_ptr(closure) else {
         return ptr::null_mut();
     };
-    let closure = unsafe { &*closure };
-    if !closure.env.is_null() || closure.code_ptr.is_null() {
-        return ptr::null_mut();
+    let closure = unsafe { &*closure_ptr };
+    if closure.env.is_null() {
+        let fun: extern "C" fn(*mut c_void) -> *mut c_void =
+            unsafe { std::mem::transmute(code_ptr) };
+        fun(arg0)
+    } else {
+        let capture0 = unsafe { *(closure.env as *const *mut c_void) };
+        let fun: extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+            unsafe { std::mem::transmute(code_ptr) };
+        fun(capture0, arg0)
     }
-    let fun: extern "C" fn(*mut c_void) -> *mut c_void =
-        unsafe { std::mem::transmute(closure.code_ptr) };
-    fun(arg0)
 }
 
 #[unsafe(no_mangle)]
@@ -112,15 +129,19 @@ pub extern "C" fn dx_rt_closure_call_ptr_1_i64(
     closure: ClosureHandle,
     arg0: i64,
 ) -> *mut c_void {
-    let Some(closure) = closure_ptr(closure) else {
+    let Some((closure_ptr, code_ptr)) = closure_code_ptr(closure) else {
         return ptr::null_mut();
     };
-    let closure = unsafe { &*closure };
-    if !closure.env.is_null() || closure.code_ptr.is_null() {
-        return ptr::null_mut();
+    let closure = unsafe { &*closure_ptr };
+    if closure.env.is_null() {
+        let fun: extern "C" fn(i64) -> *mut c_void = unsafe { std::mem::transmute(code_ptr) };
+        fun(arg0)
+    } else {
+        let capture0 = unsafe { *(closure.env as *const *mut c_void) };
+        let fun: extern "C" fn(*mut c_void, i64) -> *mut c_void =
+            unsafe { std::mem::transmute(code_ptr) };
+        fun(capture0, arg0)
     }
-    let fun: extern "C" fn(i64) -> *mut c_void = unsafe { std::mem::transmute(closure.code_ptr) };
-    fun(arg0)
 }
 
 #[unsafe(no_mangle)]
@@ -129,16 +150,20 @@ pub extern "C" fn dx_rt_closure_call_ptr_2_ptr_i64(
     arg0: *mut c_void,
     arg1: i64,
 ) -> *mut c_void {
-    let Some(closure) = closure_ptr(closure) else {
+    let Some((closure_ptr, code_ptr)) = closure_code_ptr(closure) else {
         return ptr::null_mut();
     };
-    let closure = unsafe { &*closure };
-    if !closure.env.is_null() || closure.code_ptr.is_null() {
-        return ptr::null_mut();
+    let closure = unsafe { &*closure_ptr };
+    if closure.env.is_null() {
+        let fun: extern "C" fn(*mut c_void, i64) -> *mut c_void =
+            unsafe { std::mem::transmute(code_ptr) };
+        fun(arg0, arg1)
+    } else {
+        let capture0 = unsafe { *(closure.env as *const *mut c_void) };
+        let fun: extern "C" fn(*mut c_void, *mut c_void, i64) -> *mut c_void =
+            unsafe { std::mem::transmute(code_ptr) };
+        fun(capture0, arg0, arg1)
     }
-    let fun: extern "C" fn(*mut c_void, i64) -> *mut c_void =
-        unsafe { std::mem::transmute(closure.code_ptr) };
-    fun(arg0, arg1)
 }
 
 #[unsafe(no_mangle)]
@@ -335,12 +360,20 @@ mod tests {
         x + y
     }
 
+    extern "C" fn add_pair_with_capture(capture: i64, x: i64, y: i64) -> i64 {
+        capture + x + y
+    }
+
     extern "C" fn echo_ptr(x: *mut c_void) -> *mut c_void {
         x
     }
 
     extern "C" fn int_to_ptr(x: i64) -> *mut c_void {
         x as usize as *mut c_void
+    }
+
+    extern "C" fn prepend_capture_ptr(capture: *mut c_void, _arg: i64) -> *mut c_void {
+        capture
     }
 
     #[test]
@@ -371,6 +404,29 @@ mod tests {
 
         free_closure(closure);
         free_env::<i64>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_i64_pair_call_can_dispatch_with_single_i64_capture() {
+        let env = Box::into_raw(Box::new(40_i64)) as EnvHandle;
+        let closure = dx_rt_closure_create(add_pair_with_capture as *mut c_void, env, 2);
+
+        assert_eq!(dx_rt_closure_call_i64_2_i64_i64(closure, 1, 1), 42);
+
+        free_closure(closure);
+        free_env::<i64>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_ptr_return_can_dispatch_with_single_ptr_capture() {
+        let payload = 0x1234usize as *mut c_void;
+        let env = Box::into_raw(Box::new(payload)) as EnvHandle;
+        let closure = dx_rt_closure_create(prepend_capture_ptr as *mut c_void, env, 1);
+
+        assert_eq!(dx_rt_closure_call_ptr_1_i64(closure, 7), payload);
+
+        free_closure(closure);
+        free_env::<*mut c_void>(env);
     }
 
     #[test]
