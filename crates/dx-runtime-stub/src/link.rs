@@ -33,12 +33,26 @@ pub fn render_link_command(object_path: &Path, output_path: &Path) -> String {
     build_link_command(object_path, output_path).join(" ")
 }
 
+pub fn render_link_command_json(object_path: &Path, output_path: &Path) -> String {
+    let command = build_link_command(object_path, output_path);
+    format!(
+        "{{\"command\":\"{}\",\"object_path\":\"{}\",\"output_path\":\"{}\"}}",
+        json_escape(&command.join(" ")),
+        json_escape(&object_path.display().to_string()),
+        json_escape(&output_path.display().to_string()),
+    )
+}
+
 fn default_linker() -> &'static str {
     "cc"
 }
 
 fn default_extra_args() -> &'static [&'static str] {
     &[]
+}
+
+fn json_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(test)]
@@ -69,6 +83,13 @@ mod tests {
     fn rendered_link_command_is_deterministic() {
         let a = render_link_command(Path::new("build/demo.o"), Path::new("build/demo"));
         let b = render_link_command(Path::new("build/demo.o"), Path::new("build/demo"));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn rendered_link_command_json_is_deterministic() {
+        let a = render_link_command_json(Path::new("build/demo.o"), Path::new("build/demo"));
+        let b = render_link_command_json(Path::new("build/demo.o"), Path::new("build/demo"));
         assert_eq!(a, b);
     }
 }

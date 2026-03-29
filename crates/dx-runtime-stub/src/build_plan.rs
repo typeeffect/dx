@@ -53,6 +53,38 @@ pub fn render_runtime_stub_build_plan(profile: &str, target_dir: Option<&Path>) 
     lines.join("\n")
 }
 
+pub fn render_runtime_stub_build_plan_json(profile: &str, target_dir: Option<&Path>) -> String {
+    let plan = build_runtime_stub_build_plan(profile, target_dir);
+    let env = plan
+        .env
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                "{{\"key\":\"{}\",\"value\":\"{}\"}}",
+                json_escape(key),
+                json_escape(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        concat!(
+            "{{",
+            "\"env\":[{}],",
+            "\"command\":\"{}\",",
+            "\"archive_path\":\"{}\"",
+            "}}"
+        ),
+        env,
+        json_escape(&plan.command.join(" ")),
+        json_escape(&plan.archive_path.display().to_string()),
+    )
+}
+
+fn json_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +140,13 @@ mod tests {
     fn rendered_build_plan_is_deterministic() {
         let a = render_runtime_stub_build_plan("release", Some(Path::new("/tmp/dx-target")));
         let b = render_runtime_stub_build_plan("release", Some(Path::new("/tmp/dx-target")));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn rendered_build_plan_json_is_deterministic() {
+        let a = render_runtime_stub_build_plan_json("release", Some(Path::new("/tmp/dx-target")));
+        let b = render_runtime_stub_build_plan_json("release", Some(Path::new("/tmp/dx-target")));
         assert_eq!(a, b);
     }
 }

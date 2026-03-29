@@ -74,6 +74,25 @@ pub fn render_runtime_stub_artifact_info() -> String {
     lines.join("\n")
 }
 
+pub fn render_runtime_stub_artifact_info_json() -> String {
+    let info = runtime_stub_artifact_info();
+    let symbols = info
+        .exported_symbols
+        .iter()
+        .map(|symbol| format!("\"{}\"", json_escape(symbol)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"archive_path\":\"{}\",\"exported_symbols\":[{}]}}",
+        json_escape(&info.archive_path.display().to_string()),
+        symbols
+    )
+}
+
+fn json_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +138,14 @@ mod tests {
         assert_eq!(
             render_runtime_stub_artifact_info(),
             render_runtime_stub_artifact_info()
+        );
+    }
+
+    #[test]
+    fn rendered_artifact_info_json_is_deterministic() {
+        assert_eq!(
+            render_runtime_stub_artifact_info_json(),
+            render_runtime_stub_artifact_info_json()
         );
     }
 }

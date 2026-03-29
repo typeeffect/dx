@@ -38,6 +38,34 @@ pub fn render_runtime_stub_plan(example_object: &Path, example_output: &Path) ->
     lines.join("\n")
 }
 
+pub fn render_runtime_stub_plan_json(example_object: &Path, example_output: &Path) -> String {
+    let plan = build_runtime_stub_plan(example_object, example_output);
+    let symbols = plan
+        .exported_symbols
+        .iter()
+        .map(|symbol| format!("\"{}\"", json_escape(symbol)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        concat!(
+            "{{",
+            "\"archive_path\":\"{}\",",
+            "\"linker\":\"{}\",",
+            "\"exported_symbols\":[{}],",
+            "\"example_link_command\":\"{}\"",
+            "}}"
+        ),
+        json_escape(&plan.archive_path.display().to_string()),
+        json_escape(plan.linker),
+        symbols,
+        json_escape(&plan.example_link_command.join(" ")),
+    )
+}
+
+fn json_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +100,19 @@ mod tests {
             Path::new("build/demo"),
         );
         let b = render_runtime_stub_plan(
+            Path::new("build/demo.o"),
+            Path::new("build/demo"),
+        );
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn rendered_plan_json_is_deterministic() {
+        let a = render_runtime_stub_plan_json(
+            Path::new("build/demo.o"),
+            Path::new("build/demo"),
+        );
+        let b = render_runtime_stub_plan_json(
             Path::new("build/demo.o"),
             Path::new("build/demo"),
         );
