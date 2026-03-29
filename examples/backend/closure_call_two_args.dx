@@ -1,0 +1,4 @@
+fun sum_two(x: Int) -> Int:
+    val f = (a: Int, b: Int) => a + b
+    f(x, 2)
+.

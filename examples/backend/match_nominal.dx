@@ -1,0 +1,8 @@
+fun choose(x: Result) -> Unit:
+    match x:
+        Ok(_):
+            ()
+        _:
+            ()
+    .
+.

@@ -1,0 +1,4 @@
+fun add_captured(x: Int) -> Int:
+    val f = (y: Int) => x + y
+    f(1)
+.

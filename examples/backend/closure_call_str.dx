@@ -1,0 +1,4 @@
+fun echo(s: Str) -> Str:
+    val f = (x: Str) => x
+    f(s)
+.

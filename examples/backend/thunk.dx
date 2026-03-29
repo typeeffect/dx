@@ -1,0 +1,4 @@
+fun force(x: Int) -> Int:
+    val t = lazy x
+    t()
+.
