@@ -1,6 +1,7 @@
 pub mod archive;
 pub mod link;
 pub mod manifest;
+pub mod plan;
 
 use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
