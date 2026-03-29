@@ -27,6 +27,13 @@ struct Capture2I64 {
 }
 
 #[repr(C)]
+struct Capture3I64 {
+    a: i64,
+    b: i64,
+    c: i64,
+}
+
+#[repr(C)]
 struct Capture2F64 {
     a: f64,
     b: f64,
@@ -122,6 +129,12 @@ pub extern "C" fn dx_rt_closure_call_i64_1_i64(closure: ClosureHandle, arg0: i64
                 unsafe { std::mem::transmute(closure.code_ptr) };
             fun(env.a, env.b, arg0)
         }
+        (false, 3) => {
+            let env = unsafe { &*(closure.env as *const Capture3I64) };
+            let fun: extern "C" fn(i64, i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(closure.code_ptr) };
+            fun(env.a, env.b, env.c, arg0)
+        }
         _ => 0,
     }
 }
@@ -204,6 +217,12 @@ pub extern "C" fn dx_rt_closure_call_i64_2_i64_i64(
             let fun: extern "C" fn(i64, i64, i64, i64) -> i64 =
                 unsafe { std::mem::transmute(code_ptr) };
             fun(env.a, env.b, arg0, arg1)
+        }
+        (false, 3) => {
+            let env = unsafe { &*(closure.env as *const Capture3I64) };
+            let fun: extern "C" fn(i64, i64, i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, env.c, arg0, arg1)
         }
         _ => 0,
     }
@@ -355,6 +374,12 @@ pub extern "C" fn dx_rt_thunk_call_i64(closure: ClosureHandle) -> i64 {
                 let fun: extern "C" fn(i64, i64) -> i64 =
                     unsafe { std::mem::transmute(closure.code_ptr) };
                 fun(env.a, env.b)
+            }
+            (false, 3) => {
+                let env = unsafe { &*(closure.env as *const Capture3I64) };
+                let fun: extern "C" fn(i64, i64, i64) -> i64 =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(env.a, env.b, env.c)
             }
             _ => 0,
         };
@@ -870,6 +895,18 @@ mod tests {
         c0 + c1 + x + y
     }
 
+    extern "C" fn add_three_captures(c0: i64, c1: i64, c2: i64, arg: i64) -> i64 {
+        c0 + c1 + c2 + arg
+    }
+
+    extern "C" fn add_pair_with_three_captures(c0: i64, c1: i64, c2: i64, x: i64, y: i64) -> i64 {
+        c0 + c1 + c2 + x + y
+    }
+
+    extern "C" fn sum_three_i64_captures(c0: i64, c1: i64, c2: i64) -> i64 {
+        c0 + c1 + c2
+    }
+
     #[test]
     fn ordinary_closure_i64_call_can_dispatch_with_two_i64_captures() {
         let env = Box::into_raw(Box::new(Capture2I64 { a: 20, b: 21 })) as EnvHandle;
@@ -890,6 +927,36 @@ mod tests {
 
         free_closure(closure);
         free_env::<Capture2I64>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_i64_call_can_dispatch_with_three_i64_captures() {
+        let env = Box::into_raw(Box::new(Capture3I64 {
+            a: 10,
+            b: 11,
+            c: 20,
+        })) as EnvHandle;
+        let closure = dx_rt_closure_create(add_three_captures as *mut c_void, env, 1, 3);
+
+        assert_eq!(dx_rt_closure_call_i64_1_i64(closure, 1), 42);
+
+        free_closure(closure);
+        free_env::<Capture3I64>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_i64_pair_call_can_dispatch_with_three_i64_captures() {
+        let env = Box::into_raw(Box::new(Capture3I64 {
+            a: 10,
+            b: 10,
+            c: 19,
+        })) as EnvHandle;
+        let closure = dx_rt_closure_create(add_pair_with_three_captures as *mut c_void, env, 2, 3);
+
+        assert_eq!(dx_rt_closure_call_i64_2_i64_i64(closure, 1, 2), 42);
+
+        free_closure(closure);
+        free_env::<Capture3I64>(env);
     }
 
     #[test]
@@ -922,6 +989,21 @@ mod tests {
         free_env::<Capture2F64>(env_f64);
         free_env::<Capture2I1>(env_i1);
         free_env::<*mut c_void>(env_ptr);
+    }
+
+    #[test]
+    fn thunk_i64_calls_can_dispatch_with_three_captures() {
+        let env = Box::into_raw(Box::new(Capture3I64 {
+            a: 10,
+            b: 11,
+            c: 21,
+        })) as EnvHandle;
+        let thunk = dx_rt_closure_create(sum_three_i64_captures as *mut c_void, env, 0, 3);
+
+        assert_eq!(dx_rt_thunk_call_i64(thunk), 42);
+
+        free_closure(thunk);
+        free_env::<Capture3I64>(env);
     }
 
     #[test]
