@@ -50,6 +50,11 @@ The current implementation focus is:
 - stabilizing runtime ABI assumptions
 - preparing the transition from textual LLVM IR to LLVM toolchain integration
 
+The current backend subset that is mechanically exercised through demo fixtures
+and audit tooling is documented in:
+
+- `docs/DX_TOOLCHAIN_PROVEN_SUBSET.md`
+
 ## Compiler Pipeline
 
 The intended pipeline is now:

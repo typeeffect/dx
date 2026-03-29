@@ -55,6 +55,7 @@ Executable backend demo inputs:
 
 - `docs/DX_EXECUTABLE_DEMOS.md`
 - `docs/DX_EXECUTION_WORKFLOW.md`
+- `docs/DX_TOOLCHAIN_PROVEN_SUBSET.md`
 
 Primary design docs:
 
