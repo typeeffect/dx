@@ -1,4 +1,5 @@
 pub mod archive;
+pub mod build_plan;
 pub mod link;
 pub mod manifest;
 pub mod plan;
