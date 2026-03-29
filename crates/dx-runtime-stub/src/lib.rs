@@ -324,6 +324,12 @@ pub extern "C" fn dx_rt_closure_call_ptr_1_i64(
                 unsafe { std::mem::transmute(code_ptr) };
             fun(env.p, env.i, arg0)
         }
+        (false, 3) => {
+            let env = unsafe { &*(closure.env as *const Capture3Ptr) };
+            let fun: extern "C" fn(*mut c_void, *mut c_void, *mut c_void, i64) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, env.c, arg0)
+        }
         _ => ptr::null_mut(),
     }
 }
@@ -355,6 +361,12 @@ pub extern "C" fn dx_rt_closure_call_ptr_2_ptr_i64(
             let fun: extern "C" fn(*mut c_void, i64, *mut c_void, i64) -> *mut c_void =
                 unsafe { std::mem::transmute(code_ptr) };
             fun(env.p, env.i, arg0, arg1)
+        }
+        (false, 3) => {
+            let env = unsafe { &*(closure.env as *const Capture3Ptr) };
+            let fun: extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void, i64) -> *mut c_void =
+                unsafe { std::mem::transmute(code_ptr) };
+            fun(env.a, env.b, env.c, arg0, arg1)
         }
         _ => ptr::null_mut(),
     }
@@ -813,6 +825,25 @@ mod tests {
         c2
     }
 
+    extern "C" fn third_ptr_with_i64_arg(
+        _c0: *mut c_void,
+        _c1: *mut c_void,
+        c2: *mut c_void,
+        _arg: i64,
+    ) -> *mut c_void {
+        c2
+    }
+
+    extern "C" fn third_ptr_with_mixed_args(
+        _c0: *mut c_void,
+        _c1: *mut c_void,
+        c2: *mut c_void,
+        _arg0: *mut c_void,
+        _arg1: i64,
+    ) -> *mut c_void {
+        c2
+    }
+
     extern "C" fn second_ptr_with_mixed_args(
         _c0: *mut c_void,
         c1: i64,
@@ -976,6 +1007,31 @@ mod tests {
         );
 
         free_closure(closure);
+        free_env::<Capture3Ptr>(env);
+    }
+
+    #[test]
+    fn ordinary_closure_ptr_i64_and_ptr_ptr_i64_can_dispatch_with_three_ptr_captures() {
+        let payload0 = 0x1234usize as *mut c_void;
+        let payload1 = 0x5678usize as *mut c_void;
+        let payload2 = 0x9abcusize as *mut c_void;
+        let env = Box::into_raw(Box::new(Capture3Ptr {
+            a: payload0,
+            b: payload1,
+            c: payload2,
+        })) as EnvHandle;
+
+        let c1 = dx_rt_closure_create(third_ptr_with_i64_arg as *mut c_void, env, 1, 3);
+        let c2 = dx_rt_closure_create(third_ptr_with_mixed_args as *mut c_void, env, 2, 3);
+
+        assert_eq!(dx_rt_closure_call_ptr_1_i64(c1, 7), payload2);
+        assert_eq!(
+            dx_rt_closure_call_ptr_2_ptr_i64(c2, 0xffffusize as *mut c_void, 9),
+            payload2
+        );
+
+        free_closure(c1);
+        free_closure(c2);
         free_env::<Capture3Ptr>(env);
     }
 
