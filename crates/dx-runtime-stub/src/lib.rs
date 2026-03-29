@@ -59,11 +59,18 @@ pub extern "C" fn dx_rt_closure_call_i64_1_i64(closure: ClosureHandle, arg0: i64
         return 0;
     };
     let closure = unsafe { &*closure };
-    if !closure.env.is_null() || closure.code_ptr.is_null() {
+    if closure.code_ptr.is_null() {
         return 0;
     }
-    let fun: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(closure.code_ptr) };
-    fun(arg0)
+    if closure.env.is_null() {
+        let fun: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(closure.code_ptr) };
+        fun(arg0)
+    } else {
+        let capture0 = unsafe { *(closure.env as *const i64) };
+        let fun: extern "C" fn(i64, i64) -> i64 =
+            unsafe { std::mem::transmute(closure.code_ptr) };
+        fun(capture0, arg0)
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -320,6 +327,10 @@ mod tests {
         x + 1
     }
 
+    extern "C" fn add_captured(capture: i64, arg: i64) -> i64 {
+        capture + arg
+    }
+
     extern "C" fn add_pair(x: i64, y: i64) -> i64 {
         x + y
     }
@@ -349,6 +360,17 @@ mod tests {
         free_closure(c2);
         free_closure(c3);
         free_closure(c4);
+    }
+
+    #[test]
+    fn ordinary_closure_i64_call_can_dispatch_with_single_i64_capture() {
+        let env = Box::into_raw(Box::new(41_i64)) as EnvHandle;
+        let closure = dx_rt_closure_create(add_captured as *mut c_void, env, 1);
+
+        assert_eq!(dx_rt_closure_call_i64_1_i64(closure, 1), 42);
+
+        free_closure(closure);
+        free_env::<i64>(env);
     }
 
     #[test]
