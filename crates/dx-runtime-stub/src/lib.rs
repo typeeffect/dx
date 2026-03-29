@@ -516,6 +516,18 @@ pub extern "C" fn dx_rt_thunk_call_ptr(closure: ClosureHandle) -> *mut c_void {
                     unsafe { std::mem::transmute(closure.code_ptr) };
                 fun(capture0)
             }
+            (false, 2) => {
+                let env = unsafe { &*(closure.env as *const Capture2Ptr) };
+                let fun: extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(env.a, env.b)
+            }
+            (false, 3) => {
+                let env = unsafe { &*(closure.env as *const CaptureI64PtrI1) };
+                let fun: extern "C" fn(i64, *mut c_void, bool) -> *mut c_void =
+                    unsafe { std::mem::transmute(closure.code_ptr) };
+                fun(env.i, env.p, env.b)
+            }
             _ => ptr::null_mut(),
         };
     }
@@ -527,7 +539,28 @@ pub extern "C" fn dx_rt_thunk_call_ptr(closure: ClosureHandle) -> *mut c_void {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn dx_rt_thunk_call_void(_closure: ClosureHandle) {}
+pub extern "C" fn dx_rt_thunk_call_void(closure: ClosureHandle) {
+    let Some(closure_ptr) = closure_ptr(closure) else {
+        return;
+    };
+    let closure = unsafe { &*closure_ptr };
+    if closure.code_ptr.is_null() {
+        return;
+    }
+    match (closure.env.is_null(), closure.capture_count) {
+        (true, _) => {
+            let fun: extern "C" fn() = unsafe { std::mem::transmute(closure.code_ptr) };
+            fun()
+        }
+        (false, 3) => {
+            let env = unsafe { &*(closure.env as *const CaptureI64PtrI1) };
+            let fun: extern "C" fn(i64, *mut c_void, bool) =
+                unsafe { std::mem::transmute(closure.code_ptr) };
+            fun(env.i, env.p, env.b)
+        }
+        _ => {}
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn dx_rt_match_tag(value_handle: *mut c_void, pattern_tag_name: Utf8Ptr) -> bool {
@@ -571,6 +604,7 @@ pub extern "C" fn dx_rt_py_call_dynamic(_callable: PyObjHandle, _argc: u32) -> P
 mod tests {
     use super::*;
     use std::ffi::CString;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn free_closure(handle: ClosureHandle) {
         if !handle.is_null() {
@@ -789,6 +823,31 @@ mod tests {
 
     extern "C" fn ptr_identity_thunk(capture: *mut c_void) -> *mut c_void {
         capture
+    }
+
+    extern "C" fn second_ptr_thunk(_c0: *mut c_void, c1: *mut c_void) -> *mut c_void {
+        c1
+    }
+
+    extern "C" fn mixed_ptr_thunk(_c0: i64, c1: *mut c_void, c2: bool) -> *mut c_void {
+        if c2 {
+            c1
+        } else {
+            ptr::null_mut()
+        }
+    }
+
+    static VOID_THUNK_CALLED: AtomicBool = AtomicBool::new(false);
+
+    extern "C" fn mark_void_thunk() {
+        VOID_THUNK_CALLED.store(true, Ordering::SeqCst);
+    }
+
+    extern "C" fn mixed_void_thunk(c0: i64, c1: *mut c_void, c2: bool) {
+        assert_eq!(c0, 99);
+        assert!(!c1.is_null());
+        assert!(c2);
+        VOID_THUNK_CALLED.store(true, Ordering::SeqCst);
     }
 
     #[test]
@@ -1072,6 +1131,32 @@ mod tests {
     }
 
     #[test]
+    fn thunk_ptr_calls_can_dispatch_with_two_ptr_or_mixed_captures() {
+        let payload0 = 0x1234usize as *mut c_void;
+        let payload1 = 0x5678usize as *mut c_void;
+        let env_ptrs = Box::into_raw(Box::new(Capture2Ptr {
+            a: payload0,
+            b: payload1,
+        })) as EnvHandle;
+        let env_mixed = Box::into_raw(Box::new(CaptureI64PtrI1 {
+            i: 99,
+            p: payload1,
+            b: true,
+        })) as EnvHandle;
+
+        let thunk_ptrs = dx_rt_closure_create(second_ptr_thunk as *mut c_void, env_ptrs, 0, 2);
+        let thunk_mixed = dx_rt_closure_create(mixed_ptr_thunk as *mut c_void, env_mixed, 0, 3);
+
+        assert_eq!(dx_rt_thunk_call_ptr(thunk_ptrs), payload1);
+        assert_eq!(dx_rt_thunk_call_ptr(thunk_mixed), payload1);
+
+        free_closure(thunk_ptrs);
+        free_closure(thunk_mixed);
+        free_env::<Capture2Ptr>(env_ptrs);
+        free_env::<CaptureI64PtrI1>(env_mixed);
+    }
+
+    #[test]
     fn thunk_i64_calls_can_dispatch_with_three_captures() {
         let env = Box::into_raw(Box::new(Capture3I64 {
             a: 10,
@@ -1110,6 +1195,30 @@ mod tests {
         free_closure(thunk_i1);
         free_env::<Capture3F64>(env_f64);
         free_env::<Capture3I1>(env_i1);
+    }
+
+    #[test]
+    fn thunk_void_calls_can_dispatch_with_zero_or_mixed_three_captures() {
+        let payload = 0x1234usize as *mut c_void;
+        let env = Box::into_raw(Box::new(CaptureI64PtrI1 {
+            i: 99,
+            p: payload,
+            b: true,
+        })) as EnvHandle;
+        let thunk0 = dx_rt_closure_create(mark_void_thunk as *mut c_void, ptr::null_mut(), 0, 0);
+        let thunk_mixed = dx_rt_closure_create(mixed_void_thunk as *mut c_void, env, 0, 3);
+
+        VOID_THUNK_CALLED.store(false, Ordering::SeqCst);
+        dx_rt_thunk_call_void(thunk0);
+        assert!(VOID_THUNK_CALLED.load(Ordering::SeqCst));
+
+        VOID_THUNK_CALLED.store(false, Ordering::SeqCst);
+        dx_rt_thunk_call_void(thunk_mixed);
+        assert!(VOID_THUNK_CALLED.load(Ordering::SeqCst));
+
+        free_closure(thunk0);
+        free_closure(thunk_mixed);
+        free_env::<CaptureI64PtrI1>(env);
     }
 
     #[test]
